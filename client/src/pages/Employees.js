@@ -3,6 +3,7 @@ import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { formatDateToNepali } from '../utils/dateFormatter';
 import Pagination from '../components/Pagination';
+import { supabase } from '../lib/supabaseClient';
 import './Employees.css';
 
 const normalizePositionForForm = (value, availablePositions = []) => {
@@ -54,19 +55,21 @@ const Employees = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [currentTab, setCurrentTab] = useState('current'); // 'current' | 'past'
   const itemsPerPage = 10;
-  const { user } = useContext(AuthContext);
+  const { user, authProvider } = useContext(AuthContext);
+  const isSupabaseMode = authProvider === 'supabase';
+  const DOCUMENT_BUCKET = 'employee-documents';
 
   useEffect(() => {
     fetchPositions();
     if (user?.role === 'admin') {
       fetchBranches();
     }
-  }, [user?.role]);
+  }, [user?.role, isSupabaseMode]);
 
   useEffect(() => {
     fetchEmployees();
     setCurrentPage(1);
-  }, [currentTab]);
+  }, [currentTab, isSupabaseMode]);
 
   useEffect(() => {
     if (user?.role === 'night_manager') {
@@ -76,8 +79,17 @@ const Employees = () => {
 
   const fetchPositions = async () => {
     try {
-      const response = await axios.get('/api/positions');
-      setPositions(response.data.positions);
+      if (isSupabaseMode) {
+        const { data, error } = await supabase
+          .from('positions')
+          .select('id, name, description')
+          .order('name', { ascending: true });
+        if (error) throw error;
+        setPositions(data || []);
+      } else {
+        const response = await axios.get('/api/positions');
+        setPositions(response.data.positions);
+      }
     } catch (err) {
       console.error('Failed to load positions:', err);
     }
@@ -87,11 +99,29 @@ const Employees = () => {
     try {
       setLoading(true);
       setError('');
-      const url = currentTab === 'past' ? '/api/employees?is_active=0' : '/api/employees';
-      const response = await axios.get(url);
-      setEmployees(response.data.employees);
+      if (isSupabaseMode) {
+        const isActive = currentTab === 'past' ? 0 : 1;
+        let query = supabase
+          .from('employees')
+          .select('*, branches(name)')
+          .eq('is_active', isActive)
+          .order('name', { ascending: true });
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        const mapped = (data || []).map((row) => ({
+          ...row,
+          branch_name: row.branches?.name || null
+        }));
+        setEmployees(mapped);
+      } else {
+        const url = currentTab === 'past' ? '/api/employees?is_active=0' : '/api/employees';
+        const response = await axios.get(url);
+        setEmployees(response.data.employees);
+      }
     } catch (err) {
-      setError('Failed to load employees');
+      setError(err.message || 'Failed to load employees');
     } finally {
       setLoading(false);
     }
@@ -99,8 +129,18 @@ const Employees = () => {
 
   const fetchBranches = async () => {
     try {
-      const response = await axios.get('/api/branches');
-      setBranches(response.data.branches || []);
+      if (isSupabaseMode) {
+        const { data, error } = await supabase
+          .from('branches')
+          .select('id, name, code, is_active')
+          .eq('is_active', true)
+          .order('name', { ascending: true });
+        if (error) throw error;
+        setBranches(data || []);
+      } else {
+        const response = await axios.get('/api/branches');
+        setBranches(response.data.branches || []);
+      }
     } catch (err) {
       console.error('Failed to load branches:', err);
     }
@@ -112,6 +152,27 @@ const Employees = () => {
       ...formData,
       [name]: type === 'checkbox' ? checked : value
     });
+  };
+
+  const getPublicDocumentUrl = (storagePath) => {
+    if (!storagePath) return null;
+    if (!isSupabaseMode) return storagePath;
+    if (storagePath.startsWith('http://') || storagePath.startsWith('https://')) return storagePath;
+    const { data } = supabase.storage.from(DOCUMENT_BUCKET).getPublicUrl(storagePath);
+    return data?.publicUrl || null;
+  };
+
+  const uploadEmployeeDocument = async (employeeId, file, type) => {
+    if (!file) return null;
+    const extension = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
+    const filename = `${type}-${Date.now()}-${Math.round(Math.random() * 1e6)}.${extension}`;
+    const path = `${employeeId}/${filename}`;
+    const { error } = await supabase.storage.from(DOCUMENT_BUCKET).upload(path, file, {
+      upsert: true,
+      contentType: file.type || undefined
+    });
+    if (error) throw error;
+    return path;
   };
 
   const handleSubmit = async (e) => {
@@ -149,46 +210,119 @@ const Employees = () => {
     setSubmitting(true);
 
     try {
-      const submitData = new FormData();
-      Object.keys(formData).forEach(key => {
-        if (key === 'post' && user?.role === 'night_manager') {
-          return;
+      if (isSupabaseMode) {
+        const branchId = user?.role === 'admin'
+          ? parseInt(formData.branch_id, 10)
+          : user?.branch_id;
+
+        const payload = {
+          name: formData.name.trim(),
+          phone: formData.phone.trim(),
+          email: formData.email.trim() || null,
+          permanent_address: formData.permanent_address.trim() || null,
+          temporary_address: formData.temporary_address.trim() || null,
+          receives_transportation: formData.receives_transportation ? 1 : 0,
+          salary: formData.salary ? parseFloat(formData.salary) : 0,
+          emergency_contact_name: formData.emergency_contact_name.trim() || null,
+          emergency_contact_number: formData.emergency_contact_number.trim() || null,
+          emergency_contact_relation: formData.emergency_contact_relation.trim() || null,
+          bank_name: formData.bank_name.trim() || null,
+          bank_account_number: formData.bank_account_number.trim() || null,
+          joining_date: formData.joining_date,
+          date_of_birth: formData.date_of_birth,
+          citizenship_number: formData.citizenship_number.trim() || null,
+          citizenship_issued_by: formData.citizenship_issued_by.trim() || null,
+          citizenship_issued_date: formData.citizenship_issued_date || null,
+          driving_license_number: formData.driving_license_number.trim() || null,
+          notes: formData.notes.trim() || null,
+          branch_id: Number.isNaN(branchId) ? null : branchId
+        };
+
+        if (!editingId) {
+          payload.post = effectivePost;
+          payload.is_active = 1;
+          payload.in_payroll = 0;
         }
-        if (key === 'post' && editingId) {
-          return;
+
+        if (editingId) {
+          const { error: updateErr } = await supabase
+            .from('employees')
+            .update(payload)
+            .eq('id', editingId);
+          if (updateErr) throw updateErr;
+
+          const updates = {};
+          if (idDocument) {
+            updates.id_document_path = await uploadEmployeeDocument(editingId, idDocument, 'citizenship');
+          }
+          if (drivingLicenseDocument) {
+            updates.driving_license_document_path = await uploadEmployeeDocument(editingId, drivingLicenseDocument, 'license');
+          }
+          if (Object.keys(updates).length > 0) {
+            const { error: docErr } = await supabase.from('employees').update(updates).eq('id', editingId);
+            if (docErr) throw docErr;
+          }
+        } else {
+          const { data: inserted, error: insertErr } = await supabase
+            .from('employees')
+            .insert(payload)
+            .select('id')
+            .single();
+          if (insertErr) throw insertErr;
+
+          const updates = {};
+          if (idDocument) {
+            updates.id_document_path = await uploadEmployeeDocument(inserted.id, idDocument, 'citizenship');
+          }
+          if (drivingLicenseDocument) {
+            updates.driving_license_document_path = await uploadEmployeeDocument(inserted.id, drivingLicenseDocument, 'license');
+          }
+          if (Object.keys(updates).length > 0) {
+            const { error: docErr } = await supabase.from('employees').update(updates).eq('id', inserted.id);
+            if (docErr) throw docErr;
+          }
         }
-        const value = formData[key];
-        // Skip empty strings for optional fields (email, salary)
-        if (key === 'email' || key === 'salary') {
-          if (value && value.toString().trim() !== '') {
+      } else {
+        const submitData = new FormData();
+        Object.keys(formData).forEach(key => {
+          if (key === 'post' && user?.role === 'night_manager') {
+            return;
+          }
+          if (key === 'post' && editingId) {
+            return;
+          }
+          const value = formData[key];
+          if (key === 'email' || key === 'salary') {
+            if (value && value.toString().trim() !== '') {
+              submitData.append(key, value);
+            }
+          } else if (value !== null && value !== undefined && value !== '') {
             submitData.append(key, value);
           }
-        } else if (value !== null && value !== undefined && value !== '') {
-          submitData.append(key, value);
+        });
+        if (!editingId) {
+          submitData.append('post', effectivePost);
         }
-      });
-      if (!editingId) {
-        submitData.append('post', effectivePost);
-      }
-      
-      if (idDocument) {
-        submitData.append('id_document', idDocument);
-      }
-      
-      if (drivingLicenseDocument) {
-        submitData.append('driving_license_document', drivingLicenseDocument);
-      }
 
-      const config = {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      };
+        if (idDocument) {
+          submitData.append('id_document', idDocument);
+        }
 
-      if (editingId) {
-        await axios.put(`/api/employees/${editingId}`, submitData, config);
-      } else {
-        await axios.post('/api/employees', submitData, config);
+        if (drivingLicenseDocument) {
+          submitData.append('driving_license_document', drivingLicenseDocument);
+        }
+
+        const config = {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        };
+
+        if (editingId) {
+          await axios.put(`/api/employees/${editingId}`, submitData, config);
+        } else {
+          await axios.post('/api/employees', submitData, config);
+        }
       }
       resetForm();
       fetchEmployees();
@@ -263,8 +397,8 @@ const Employees = () => {
       driving_license_number: employee.driving_license_number || '',
       notes: employee.notes || ''
     });
-    setExistingIdDocument(employee.id_document_path || null);
-    setExistingDrivingLicenseDocument(employee.driving_license_document_path || null);
+    setExistingIdDocument(getPublicDocumentUrl(employee.id_document_path) || null);
+    setExistingDrivingLicenseDocument(getPublicDocumentUrl(employee.driving_license_document_path) || null);
     setIdDocument(null);
     setDrivingLicenseDocument(null);
     setEditingId(employee.id);
@@ -277,19 +411,29 @@ const Employees = () => {
     }
 
     try {
-      await axios.delete(`/api/employees/${id}`);
+      if (isSupabaseMode) {
+        const { error } = await supabase.from('employees').update({ is_active: 0 }).eq('id', id);
+        if (error) throw error;
+      } else {
+        await axios.delete(`/api/employees/${id}`);
+      }
       fetchEmployees();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to move employee');
+      alert(err.response?.data?.error || err.message || 'Failed to move employee');
     }
   };
 
   const handleReactivate = async (employee) => {
     try {
-      await axios.put(`/api/employees/${employee.id}/activate`);
+      if (isSupabaseMode) {
+        const { error } = await supabase.from('employees').update({ is_active: 1 }).eq('id', employee.id);
+        if (error) throw error;
+      } else {
+        await axios.put(`/api/employees/${employee.id}/activate`);
+      }
       fetchEmployees();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to reactivate employee');
+      alert(err.response?.data?.error || err.message || 'Failed to reactivate employee');
     }
   };
 

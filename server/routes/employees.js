@@ -6,45 +6,6 @@ const { body, validationResult } = require('express-validator');
 const { getDb } = require('../database/init');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
-// Import account code generation function
-const getCategoryPrefix = (category) => {
-  const prefixes = {
-    'asset': 1,
-    'liability': 2,
-    'equity': 3,
-    'income': 4,
-    'expense': 5
-  };
-  return prefixes[category] || 1;
-};
-
-const generateAccountCode = async (db, category) => {
-  try {
-    const prefix = getCategoryPrefix(category);
-    const prefixStr = prefix.toString();
-    
-    const result = await db.query(
-      `SELECT account_code FROM chart_of_accounts 
-       WHERE category = $1 AND account_code LIKE $2 
-       ORDER BY CAST(account_code AS INTEGER) DESC 
-       LIMIT 1`,
-      [category, prefixStr + '%']
-    );
-    
-    let nextNumber = 1;
-    
-    if (result.rows.length > 0) {
-      const lastCode = result.rows[0].account_code;
-      const lastNumber = parseInt(lastCode.substring(prefixStr.length)) || 0;
-      nextNumber = lastNumber + 1;
-    }
-    
-    return prefixStr + String(nextNumber).padStart(3, '0');
-  } catch (error) {
-    throw error;
-  }
-};
-
 const parseBooleanFlag = (value, defaultValue = 0) => {
   if (value === undefined || value === null || value === '') {
     return defaultValue;
@@ -407,22 +368,6 @@ router.post('/',
       );
 
       const employeeId = insertResult.rows[0].id;
-      
-      // Create chart of accounts entry for the employee
-      try {
-        const accountCode = await generateAccountCode(db, 'expense');
-        const accountName = `${name} - Salary`;
-        
-        await db.query(
-          'INSERT INTO chart_of_accounts (account_name, account_code, category, subcategory, opening_balance, description) VALUES ($1, $2, $3, $4, $5, $6)',
-          [accountName, accountCode, 'expense', 'salary', 0, `Salary account for employee: ${name}`]
-        );
-        
-        console.log(`Created salary account ${accountCode} for employee: ${name}`);
-      } catch (accountErr) {
-        console.error('Error creating chart of accounts entry for employee:', accountErr);
-        // Don't fail the employee creation if account creation fails
-      }
       
       // Fetch and return the created employee
       const employeeResult = await db.query(

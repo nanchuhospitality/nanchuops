@@ -17,6 +17,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { AuthContext } from '../context/AuthContext';
+import { supabase } from '../lib/supabaseClient';
 import './Dashboard.css';
 
 const formatISODate = (date) => {
@@ -68,7 +69,8 @@ const getPresetRange = (preset) => {
 const DEFAULT_RANGE = getPresetRange('last30');
 
 const Dashboard = () => {
-  const { user } = useContext(AuthContext);
+  const { user, authProvider } = useContext(AuthContext);
+  const isSupabaseMode = authProvider === 'supabase';
   const { branchslug } = useParams();
   const branchPath = (path) => `/${branchslug || user?.branch_code || 'main'}/${path}`;
   const [stats, setStats] = useState(null);
@@ -81,6 +83,18 @@ const Dashboard = () => {
   const [dateTo, setDateTo] = useState(DEFAULT_RANGE.to);
   const [missingDocumentEmployees, setMissingDocumentEmployees] = useState([]);
   const [showMissingDocsMenu, setShowMissingDocsMenu] = useState(false);
+  const emptyStats = {
+    totalSales: 0,
+    todaySales: 0,
+    monthSales: 0,
+    totalRecords: 0,
+    dailySales: [],
+    totalQRSales: 0,
+    totalCashSales: 0,
+    totalRiderPayment: 0,
+    totalTransportation: 0,
+    transportationByRecipient: []
+  };
 
   useEffect(() => {
     if (user?.role === 'admin') {
@@ -88,13 +102,13 @@ const Dashboard = () => {
       fetchMissingDocuments();
     }
     fetchStats();
-  }, [user?.role]);
+  }, [user?.role, isSupabaseMode]);
 
   useEffect(() => {
     if (user?.role) {
       fetchStats();
     }
-  }, [branchFilter, dateFrom, dateTo, user?.role]);
+  }, [branchFilter, dateFrom, dateTo, user?.role, isSupabaseMode]);
 
   // Redirect night_manager away from dashboard
   if (user?.role === 'night_manager') {
@@ -108,18 +122,77 @@ const Dashboard = () => {
         return;
       }
       setError('');
-      const params = new URLSearchParams();
-      if (user?.role === 'admin' && branchFilter) {
-        params.set('branch_id', branchFilter);
+      if (isSupabaseMode) {
+        let query = supabase.from('sales_records').select('*');
+        if (user?.role === 'admin' && branchFilter) {
+          query = query.eq('branch_id', parseInt(branchFilter, 10));
+        }
+        if (dateFrom) {
+          query = query.gte('date', dateFrom);
+        }
+        if (dateTo) {
+          query = query.lte('date', dateTo);
+        }
+        const { data, error: qErr } = await query;
+        if (qErr) throw qErr;
+        const rows = data || [];
+        const today = formatISODate(new Date());
+        const monthPrefix = today.slice(0, 7);
+        const dailyMap = new Map();
+        const recipientMap = {};
+        const calc = rows.reduce((acc, r) => {
+          const amount = parseFloat(r.amount) || 0;
+          const qr = parseFloat(r.total_qr_sales) || 0;
+          const cash = parseFloat(r.total_cash_sales) || 0;
+          const rider = parseFloat(r.total_rider_payment) || 0;
+          const transportation = parseFloat(r.transportation_amount) || 0;
+          acc.totalSales += amount;
+          acc.totalQRSales += qr;
+          acc.totalCashSales += cash;
+          acc.totalRiderPayment += rider;
+          acc.totalTransportation += transportation;
+          if (String(r.date || '').slice(0, 10) === today) acc.todaySales += amount;
+          if (String(r.date || '').slice(0, 7) === monthPrefix) acc.monthSales += amount;
+          const key = String(r.date || '').slice(0, 10);
+          dailyMap.set(key, (dailyMap.get(key) || 0) + amount);
+          if (r.transportation_recipients) {
+            try {
+              const recipients = typeof r.transportation_recipients === 'string'
+                ? JSON.parse(r.transportation_recipients)
+                : r.transportation_recipients;
+              if (Array.isArray(recipients)) {
+                recipients.forEach((rec) => {
+                  if (rec?.name) {
+                    recipientMap[rec.name] = (recipientMap[rec.name] || 0) + (parseFloat(rec.amount) || 0);
+                  }
+                });
+              }
+            } catch (_) {}
+          }
+          return acc;
+        }, { ...emptyStats });
+        calc.totalRecords = rows.length;
+        calc.dailySales = Array.from(dailyMap.entries())
+          .map(([date, total]) => ({ date, total }))
+          .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        calc.transportationByRecipient = Object.entries(recipientMap)
+          .map(([recipient_name, total]) => ({ recipient_name, total }))
+          .sort((a, b) => b.total - a.total);
+        setStats(calc);
+      } else {
+        const params = new URLSearchParams();
+        if (user?.role === 'admin' && branchFilter) {
+          params.set('branch_id', branchFilter);
+        }
+        if (dateFrom) {
+          params.set('date_from', dateFrom);
+        }
+        if (dateTo) {
+          params.set('date_to', dateTo);
+        }
+        const response = await axios.get(`/api/dashboard/stats${params.toString() ? `?${params.toString()}` : ''}`);
+        setStats(response.data);
       }
-      if (dateFrom) {
-        params.set('date_from', dateFrom);
-      }
-      if (dateTo) {
-        params.set('date_to', dateTo);
-      }
-      const response = await axios.get(`/api/dashboard/stats${params.toString() ? `?${params.toString()}` : ''}`);
-      setStats(response.data);
     } catch (err) {
       setError('Failed to load dashboard statistics');
       console.error(err);
@@ -130,8 +203,18 @@ const Dashboard = () => {
 
   const fetchBranches = async () => {
     try {
-      const response = await axios.get('/api/branches');
-      setBranches(response.data.branches || []);
+      if (isSupabaseMode) {
+        const { data, error: bErr } = await supabase
+          .from('branches')
+          .select('id, name, code')
+          .eq('is_active', true)
+          .order('name', { ascending: true });
+        if (bErr) throw bErr;
+        setBranches(data || []);
+      } else {
+        const response = await axios.get('/api/branches');
+        setBranches(response.data.branches || []);
+      }
     } catch (err) {
       console.error('Failed to load branches', err);
     }
@@ -139,8 +222,18 @@ const Dashboard = () => {
 
   const fetchMissingDocuments = async () => {
     try {
-      const response = await axios.get('/api/employees');
-      const employees = response.data?.employees || [];
+      let employees = [];
+      if (isSupabaseMode) {
+        const { data, error: empErr } = await supabase
+          .from('employees')
+          .select('id, name, post, id_document_path, driving_license_document_path')
+          .eq('is_active', 1);
+        if (empErr) throw empErr;
+        employees = data || [];
+      } else {
+        const response = await axios.get('/api/employees');
+        employees = response.data?.employees || [];
+      }
       const missing = employees
         .filter((employee) => {
           const isRider = employee.post && employee.post.toLowerCase() === 'rider';
@@ -306,31 +399,31 @@ const Dashboard = () => {
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-label">Total Sales</div>
-          <div className="stat-value">{formatCurrency(stats.totalSales)}</div>
+          <div className="stat-value">{formatCurrency(stats?.totalSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Today's Sales</div>
-          <div className="stat-value">{formatCurrency(stats.todaySales)}</div>
+          <div className="stat-value">{formatCurrency(stats?.todaySales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">This Month</div>
-          <div className="stat-value">{formatCurrency(stats.monthSales)}</div>
+          <div className="stat-value">{formatCurrency(stats?.monthSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Records</div>
-          <div className="stat-value">{stats.totalRecords}</div>
+          <div className="stat-value">{stats?.totalRecords || 0}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total QR Sales</div>
-          <div className="stat-value">{formatCurrency(stats.totalQRSales)}</div>
+          <div className="stat-value">{formatCurrency(stats?.totalQRSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Cash Sales</div>
-          <div className="stat-value">{formatCurrency(stats.totalCashSales)}</div>
+          <div className="stat-value">{formatCurrency(stats?.totalCashSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Rider Payment</div>
-          <div className="stat-value">{formatCurrency(stats.totalRiderPayment)}</div>
+          <div className="stat-value">{formatCurrency(stats?.totalRiderPayment)}</div>
         </div>
       </div>
 
@@ -339,7 +432,7 @@ const Dashboard = () => {
         <div className="stats-grid">
           <div className="stat-card expense-card">
             <div className="stat-label">Total Transportation Expenses</div>
-            <div className="stat-value">{formatCurrency(stats.totalTransportation)}</div>
+            <div className="stat-value">{formatCurrency(stats?.totalTransportation)}</div>
           </div>
         </div>
 

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { formatDateToNepali } from '../utils/dateFormatter';
 import Pagination from '../components/Pagination';
+import { supabase } from '../lib/supabaseClient';
 import './Positions.css';
 
 const Positions = () => {
@@ -19,18 +20,28 @@ const Positions = () => {
   const [submitting, setSubmitting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const { user } = useContext(AuthContext);
+  const { user, authProvider } = useContext(AuthContext);
+  const isSupabaseMode = authProvider === 'supabase';
 
   useEffect(() => {
     fetchPositions();
-  }, []);
+  }, [isSupabaseMode]);
 
   const fetchPositions = async () => {
     try {
-      const response = await axios.get('/api/positions');
-      setPositions(response.data.positions);
+      if (isSupabaseMode) {
+        const { data, error } = await supabase
+          .from('positions')
+          .select('*')
+          .order('name', { ascending: true });
+        if (error) throw error;
+        setPositions(data || []);
+      } else {
+        const response = await axios.get('/api/positions');
+        setPositions(response.data.positions);
+      }
     } catch (err) {
-      setError('Failed to load positions');
+      setError(err.message || 'Failed to load positions');
     } finally {
       setLoading(false);
     }
@@ -50,7 +61,19 @@ const Positions = () => {
     setSubmitting(true);
 
     try {
-      if (editingId) {
+      if (isSupabaseMode) {
+        const payload = {
+          name: (formData.name || '').trim(),
+          description: formData.description || null
+        };
+        if (editingId) {
+          const { error } = await supabase.from('positions').update(payload).eq('id', editingId);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('positions').insert(payload);
+          if (error) throw error;
+        }
+      } else if (editingId) {
         await axios.put(`/api/positions/${editingId}`, formData);
       } else {
         await axios.post('/api/positions', formData);
@@ -58,7 +81,7 @@ const Positions = () => {
       resetForm();
       fetchPositions();
     } catch (err) {
-      setFormError(err.response?.data?.error || 'Failed to save position');
+      setFormError(err.response?.data?.error || err.message || 'Failed to save position');
     } finally {
       setSubmitting(false);
     }
@@ -89,10 +112,15 @@ const Positions = () => {
     }
 
     try {
-      await axios.delete(`/api/positions/${id}`);
+      if (isSupabaseMode) {
+        const { error } = await supabase.from('positions').delete().eq('id', id);
+        if (error) throw error;
+      } else {
+        await axios.delete(`/api/positions/${id}`);
+      }
       fetchPositions();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to delete position');
+      alert(err.response?.data?.error || err.message || 'Failed to delete position');
     }
   };
 

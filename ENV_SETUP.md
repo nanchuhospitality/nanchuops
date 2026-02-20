@@ -1,44 +1,47 @@
 # Environment Variables Setup
 
-## Create .env File
+This project currently supports:
+- existing Express backend mode
+- migration path to Supabase mode
 
-Create a `.env` file in the root directory with the following variables:
+## 1) Server Variables (`server/.env`)
+
+Use these while Express is still running:
 
 ```env
-# Server Configuration
 NODE_ENV=production
 PORT=3001
-
-# JWT Secret - Generate a strong random string for production
-# Use: openssl rand -base64 32
 JWT_SECRET=your-strong-random-secret-key-here
-
-# CORS Configuration - Comma-separated list of allowed origins
-# Example: ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DB_NAME
 ALLOWED_ORIGINS=https://yourdomain.com
 ```
 
-## Generate JWT Secret
-
-Run this command to generate a secure JWT secret:
+Generate JWT secret:
 
 ```bash
 openssl rand -base64 32
 ```
 
-Copy the output and paste it as the value for `JWT_SECRET` in your `.env` file.
+## 2) Client Variables (`client/.env.production` or Vercel env)
 
-## Client Environment (Optional)
-
-If your API is hosted on a different domain, create `client/.env.production`:
+For current API mode:
 
 ```env
-REACT_APP_API_URL=https://yourdomain.com
+REACT_APP_API_URL=https://your-api-domain.com
 ```
 
-## Security Notes
+For Supabase migration mode:
 
-- **Never commit `.env` to version control** - it's already in `.gitignore`
-- **Change default admin password** immediately after first login
-- **Use strong JWT_SECRET** in production
-- **Restrict CORS** to your domain only in production
+```env
+REACT_APP_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+```
+
+Template file is available at `client/.env.example`.
+
+## 3) Security Notes
+
+- Never commit secrets (`.env*` files are ignored)
+- Never expose Supabase service-role key in frontend
+- Use strong JWT secret until Express is fully removed
+- Restrict CORS origins in production

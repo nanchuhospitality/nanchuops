@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import Pagination from '../components/Pagination';
+import { supabase } from '../lib/supabaseClient';
 import './SalesList.css';
 
 const SalesList = () => {
@@ -17,7 +18,8 @@ const SalesList = () => {
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const { user } = useContext(AuthContext);
+  const { user, authProvider } = useContext(AuthContext);
+  const isSupabaseMode = authProvider === 'supabase';
   const branchPath = (path) => `/${branchslug || user?.branch_code || 'main'}/${path}`;
 
   useEffect(() => {
@@ -25,24 +27,43 @@ const SalesList = () => {
     if (user?.role === 'admin') {
       fetchBranches();
     }
-  }, [user?.role]);
+  }, [user?.role, isSupabaseMode]);
 
   useEffect(() => {
     if (user?.role === 'admin') {
       fetchRecords();
     }
-  }, [branchFilter, user?.role]);
+  }, [branchFilter, user?.role, isSupabaseMode]);
 
   const fetchRecords = async () => {
     try {
-      const params = new URLSearchParams();
-      if (user?.role === 'admin' && branchFilter) {
-        params.set('branch_id', branchFilter);
+      if (isSupabaseMode) {
+        let query = supabase
+          .from('sales_records')
+          .select('*, branches(name), users(username, full_name)')
+          .order('date', { ascending: false });
+        if (user?.role === 'admin' && branchFilter) {
+          query = query.eq('branch_id', parseInt(branchFilter, 10));
+        }
+        const { data, error: qErr } = await query;
+        if (qErr) throw qErr;
+        const mapped = (data || []).map((r) => ({
+          ...r,
+          branch_name: r.branches?.name || null,
+          username: r.users?.username || null,
+          full_name: r.users?.full_name || null
+        }));
+        setRecords(mapped);
+      } else {
+        const params = new URLSearchParams();
+        if (user?.role === 'admin' && branchFilter) {
+          params.set('branch_id', branchFilter);
+        }
+        const response = await axios.get(`/api/sales${params.toString() ? `?${params.toString()}` : ''}`);
+        setRecords(response.data.records || []);
       }
-      const response = await axios.get(`/api/sales${params.toString() ? `?${params.toString()}` : ''}`);
-      setRecords(response.data.records || []);
     } catch (err) {
-      setError('Failed to load sales records');
+      setError(err.message || 'Failed to load sales records');
     } finally {
       setLoading(false);
     }
@@ -50,8 +71,18 @@ const SalesList = () => {
 
   const fetchBranches = async () => {
     try {
-      const response = await axios.get('/api/branches');
-      setBranches(response.data.branches || []);
+      if (isSupabaseMode) {
+        const { data, error: bErr } = await supabase
+          .from('branches')
+          .select('id, name, code')
+          .eq('is_active', true)
+          .order('name', { ascending: true });
+        if (bErr) throw bErr;
+        setBranches(data || []);
+      } else {
+        const response = await axios.get('/api/branches');
+        setBranches(response.data.branches || []);
+      }
     } catch (err) {
       console.error('Failed to load branches', err);
     }

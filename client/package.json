@@ -2,8 +2,9 @@
   "name": "nova-accounting-client",
   "version": "0.1.0",
   "private": true,
-  "proxy": "http://localhost:3001",
+  "proxy": "http://localhost:5000",
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
     "axios": "^1.6.2",
     "nepali-date-converter": "^3.4.0",
     "react": "^18.2.0",

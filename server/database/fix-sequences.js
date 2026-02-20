@@ -8,13 +8,9 @@ const fixSequences = async () => {
     
     // Get the maximum ID from each table and set the sequence to max + 1
     const tables = [
-      'journal_entry_lines',
-      'journal_entries',
       'sales_records',
-      'purchases_records',
       'employees',
-      'chart_of_accounts',
-      'subcategories',
+      'branches',
       'positions',
       'users'
     ];

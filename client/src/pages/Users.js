@@ -3,10 +3,12 @@ import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { formatDateToNepali } from '../utils/dateFormatter';
 import Pagination from '../components/Pagination';
+import { supabase } from '../lib/supabaseClient';
 import './Users.css';
 
 const Users = () => {
-  const { user: currentUser } = useContext(AuthContext);
+  const { user: currentUser, authProvider } = useContext(AuthContext);
+  const isSupabaseMode = authProvider === 'supabase';
   const canManageUsers = currentUser?.role === 'admin' || currentUser?.role === 'branch_admin';
   const isBranchAdmin = currentUser?.role === 'branch_admin';
   const [users, setUsers] = useState([]);
@@ -42,14 +44,27 @@ const Users = () => {
         branch_id: String(currentUser.branch_id)
       }));
     }
-  }, [canManageUsers, currentUser?.role, currentUser?.branch_id, isBranchAdmin]);
+  }, [canManageUsers, currentUser?.role, currentUser?.branch_id, isBranchAdmin, isSupabaseMode]);
 
   const fetchUsers = async () => {
     try {
-      const response = await axios.get('/api/auth/users');
-      setUsers(response.data.users);
+      if (isSupabaseMode) {
+        const { data, error } = await supabase
+          .from('users')
+          .select('id, username, email, full_name, role, receives_transportation, created_at, branch_id, branches(name)')
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        const mapped = (data || []).map((u) => ({
+          ...u,
+          branch_name: u.branches?.name || null
+        }));
+        setUsers(mapped);
+      } else {
+        const response = await axios.get('/api/auth/users');
+        setUsers(response.data.users);
+      }
     } catch (err) {
-      setError('Failed to load users');
+      setError(err.message || 'Failed to load users');
     } finally {
       setLoading(false);
     }
@@ -57,8 +72,18 @@ const Users = () => {
 
   const fetchBranches = async () => {
     try {
-      const response = await axios.get('/api/branches');
-      setBranches(response.data.branches || []);
+      if (isSupabaseMode) {
+        const { data, error } = await supabase
+          .from('branches')
+          .select('id, name, code')
+          .eq('is_active', true)
+          .order('name', { ascending: true });
+        if (error) throw error;
+        setBranches(data || []);
+      } else {
+        const response = await axios.get('/api/branches');
+        setBranches(response.data.branches || []);
+      }
     } catch (err) {
       console.error('Failed to load branches', err);
     }
@@ -78,19 +103,31 @@ const Users = () => {
 
     try {
       if (editingUserId) {
-        // Update existing user
         const updateData = { ...formData };
         updateData.branch_id = updateData.branch_id ? parseInt(updateData.branch_id, 10) : null;
         if (updateData.role === 'night_manager' || updateData.role === 'nightmanager') {
           updateData.role = 'night_manager';
         }
-        if (!updateData.password) {
-          delete updateData.password; // Don't send empty password
+
+        if (isSupabaseMode) {
+          const payload = {
+            role: updateData.role,
+            branch_id: updateData.branch_id
+          };
+          const { error } = await supabase.from('users').update(payload).eq('id', editingUserId);
+          if (error) throw error;
+        } else {
+          if (!updateData.password) {
+            delete updateData.password;
+          }
+          delete updateData.receives_transportation;
+          await axios.put(`/api/auth/users/${editingUserId}`, updateData);
         }
-        delete updateData.receives_transportation; // Remove from update
-        await axios.put(`/api/auth/users/${editingUserId}`, updateData);
         setEditingUserId(null);
       } else {
+        if (isSupabaseMode) {
+          throw new Error('Create user is disabled in Supabase mode. Create Auth user first, then assign role here.');
+        }
         // Create new user
         const createData = {
           ...formData,
@@ -113,7 +150,7 @@ const Users = () => {
       setShowForm(false);
       fetchUsers();
     } catch (err) {
-      setFormError(err.response?.data?.error || (editingUserId ? 'Failed to update user' : 'Failed to create user'));
+      setFormError(err.response?.data?.error || err.message || (editingUserId ? 'Failed to update user' : 'Failed to create user'));
     } finally {
       setSubmitting(false);
     }
@@ -140,10 +177,15 @@ const Users = () => {
     }
 
     try {
-      await axios.delete(`/api/auth/users/${userId}`);
+      if (isSupabaseMode) {
+        const { error } = await supabase.from('users').delete().eq('id', userId);
+        if (error) throw error;
+      } else {
+        await axios.delete(`/api/auth/users/${userId}`);
+      }
       fetchUsers();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to delete user');
+      alert(err.response?.data?.error || err.message || 'Failed to delete user');
     }
   };
 
@@ -178,16 +220,26 @@ const Users = () => {
     <div className="users">
       <div className="page-header">
         <h1>User Management</h1>
-        <button onClick={() => setShowForm(!showForm)} className="btn-new">
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="btn-new"
+          disabled={isSupabaseMode}
+          title={isSupabaseMode ? 'Create users in Supabase Authentication first' : 'Add New User'}
+        >
           + Add New User
         </button>
       </div>
 
       {error && <div className="error-message">{error}</div>}
+      {isSupabaseMode && (
+        <div className="error-message" style={{ background: '#eef7ff', color: '#1f4d7a', borderColor: '#d6e8f8' }}>
+          In Supabase mode, new users must be created in Supabase Authentication first, then edited here for role/branch.
+        </div>
+      )}
 
       {showForm && (
         <div className="form-container">
-          <h2>{editingUserId ? 'Edit User' : 'Create New User'}</h2>
+          <h2>{editingUserId ? (isSupabaseMode ? 'Edit User Role/Branch' : 'Edit User') : 'Create New User'}</h2>
           {formError && <div className="error-message">{formError}</div>}
           <form onSubmit={handleSubmit}>
             <div className="form-row">
@@ -199,6 +251,7 @@ const Users = () => {
                   name="username"
                   value={formData.username}
                   onChange={handleChange}
+                  disabled={isSupabaseMode}
                   required
                 />
               </div>
@@ -210,10 +263,12 @@ const Users = () => {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
+                  disabled={isSupabaseMode}
                   required
                 />
               </div>
             </div>
+            {!isSupabaseMode && (
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="password">Password {editingUserId ? '' : '*'}</label>
@@ -238,6 +293,7 @@ const Users = () => {
                 />
               </div>
             </div>
+            )}
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="role">Role *</label>
@@ -290,17 +346,19 @@ const Users = () => {
                   />
                 </div>
               )}
-              <div className="form-group">
-                <label>
-                  <input
-                    type="checkbox"
-                    name="receives_transportation"
-                    checked={formData.receives_transportation}
-                    onChange={(e) => setFormData({ ...formData, receives_transportation: e.target.checked })}
-                  />
-                  {' '}Receives Transportation
-                </label>
-              </div>
+              {!isSupabaseMode && (
+                <div className="form-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      name="receives_transportation"
+                      checked={formData.receives_transportation}
+                      onChange={(e) => setFormData({ ...formData, receives_transportation: e.target.checked })}
+                    />
+                    {' '}Receives Transportation
+                  </label>
+                </div>
+              )}
             </div>
             <div className="form-actions">
               <button
@@ -311,7 +369,9 @@ const Users = () => {
                 Cancel
               </button>
               <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? (editingUserId ? 'Updating...' : 'Creating...') : (editingUserId ? 'Update User' : 'Create User')}
+                {submitting
+                  ? (editingUserId ? 'Updating...' : 'Creating...')
+                  : (editingUserId ? (isSupabaseMode ? 'Update Role/Branch' : 'Update User') : 'Create User')}
               </button>
             </div>
           </form>

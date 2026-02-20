@@ -1,8 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import { AuthContext } from '../context/AuthContext';
+import { supabase } from '../lib/supabaseClient';
 import './Users.css';
 
 const Branches = () => {
+  const { user, authProvider } = useContext(AuthContext);
+  const isSupabaseMode = authProvider === 'supabase';
+  const canManageBranches = user?.role === 'admin';
+
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -22,14 +28,64 @@ const Branches = () => {
 
   useEffect(() => {
     fetchBranches();
-  }, []);
+  }, [isSupabaseMode, user?.role]);
+
+  const employeeCountByBranch = useMemo(() => {
+    const map = new Map();
+    branches.forEach((b) => {
+      map.set(b.id, {
+        total: b.total_employees || 0,
+        active: b.active_employees || 0
+      });
+    });
+    return map;
+  }, [branches]);
 
   const fetchBranches = async () => {
     try {
+      setLoading(true);
+      setError('');
+
+      if (isSupabaseMode) {
+        let query = supabase
+          .from('branches')
+          .select('id, name, code, is_active, created_at, updated_at')
+          .order('name', { ascending: true });
+
+        if (!canManageBranches) {
+          query = query.eq('is_active', true);
+        }
+
+        const { data: branchRows, error: branchErr } = await query;
+        if (branchErr) throw branchErr;
+
+        const { data: employeeRows, error: empErr } = await supabase
+          .from('employees')
+          .select('branch_id, is_active');
+        if (empErr) throw empErr;
+
+        const counts = new Map();
+        (employeeRows || []).forEach((row) => {
+          if (!row.branch_id) return;
+          const current = counts.get(row.branch_id) || { total_employees: 0, active_employees: 0 };
+          current.total_employees += 1;
+          if (row.is_active === 1) current.active_employees += 1;
+          counts.set(row.branch_id, current);
+        });
+
+        const enriched = (branchRows || []).map((b) => ({
+          ...b,
+          ...(counts.get(b.id) || { total_employees: 0, active_employees: 0 })
+        }));
+
+        setBranches(enriched);
+        return;
+      }
+
       const response = await axios.get('/api/branches?include_inactive=true');
       setBranches(response.data.branches || []);
     } catch (err) {
-      setError('Failed to load branches');
+      setError(err.message || 'Failed to load branches');
     } finally {
       setLoading(false);
     }
@@ -55,7 +111,28 @@ const Branches = () => {
     setFormError('');
     setSubmitting(true);
     try {
-      if (editingId) {
+      if (isSupabaseMode) {
+        if (!canManageBranches) {
+          throw new Error('Admin access required');
+        }
+
+        const payload = {
+          name: formData.name.trim(),
+          code: formData.code.trim() || null,
+          is_active: Boolean(formData.is_active)
+        };
+
+        if (editingId) {
+          const { error: updateErr } = await supabase
+            .from('branches')
+            .update(payload)
+            .eq('id', editingId);
+          if (updateErr) throw updateErr;
+        } else {
+          const { error: createErr } = await supabase.from('branches').insert(payload);
+          if (createErr) throw createErr;
+        }
+      } else if (editingId) {
         const updateData = {
           name: formData.name,
           code: formData.code,
@@ -65,10 +142,11 @@ const Branches = () => {
       } else {
         await axios.post('/api/branches', formData);
       }
+
       await fetchBranches();
       resetForm();
     } catch (err) {
-      setFormError(err.response?.data?.error || 'Failed to save branch');
+      setFormError(err.response?.data?.error || err.message || 'Failed to save branch');
     } finally {
       setSubmitting(false);
     }
@@ -92,10 +170,20 @@ const Branches = () => {
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this branch?')) return;
     try {
-      await axios.delete(`/api/branches/${id}`);
+      if (isSupabaseMode) {
+        const count = employeeCountByBranch.get(id);
+        if ((count?.total || 0) > 0) {
+          alert('Cannot delete branch with linked employees. Mark it inactive instead.');
+          return;
+        }
+        const { error: delErr } = await supabase.from('branches').delete().eq('id', id);
+        if (delErr) throw delErr;
+      } else {
+        await axios.delete(`/api/branches/${id}`);
+      }
       fetchBranches();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to delete branch');
+      alert(err.response?.data?.error || err.message || 'Failed to delete branch');
     }
   };
 
@@ -105,17 +193,24 @@ const Branches = () => {
     <div className="users">
       <div className="page-header">
         <h1>Branch Management</h1>
-        <button className="btn-new" onClick={() => setShowForm((v) => !v)}>
-          + Add Branch
-        </button>
+        {canManageBranches && (
+          <button className="btn-new" onClick={() => setShowForm((v) => !v)}>
+            + Add Branch
+          </button>
+        )}
       </div>
 
       {error && <div className="error-message">{error}</div>}
 
-      {showForm && (
+      {showForm && canManageBranches && (
         <div className="form-container">
           <h2>{editingId ? 'Edit Branch' : 'Create Branch'}</h2>
           {formError && <div className="error-message">{formError}</div>}
+          {isSupabaseMode && !editingId && (
+            <div className="error-message" style={{ background: '#eef7ff', color: '#1f4d7a', borderColor: '#d6e8f8' }}>
+              Branch admin account creation is now managed separately from User Management.
+            </div>
+          )}
           <form onSubmit={handleSubmit}>
             <div className="form-row">
               <div className="form-group">
@@ -136,7 +231,8 @@ const Branches = () => {
                 />
               </div>
             </div>
-            {!editingId && (
+
+            {!isSupabaseMode && !editingId && (
               <>
                 <div className="form-row">
                   <div className="form-group">
@@ -182,6 +278,7 @@ const Branches = () => {
                 </div>
               </>
             )}
+
             <div className="form-row">
               <div className="form-group">
                 <label>
@@ -212,7 +309,7 @@ const Branches = () => {
               <th>Code</th>
               <th>Employees</th>
               <th>Status</th>
-              <th>Actions</th>
+              {canManageBranches && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -222,17 +319,19 @@ const Branches = () => {
                 <td>{branch.code || '-'}</td>
                 <td>{`${branch.active_employees || 0} active / ${branch.total_employees || 0} total`}</td>
                 <td>{branch.is_active ? 'Active' : 'Inactive'}</td>
-                <td>
-                  <div className="action-buttons">
-                    <button className="btn-edit" onClick={() => handleEdit(branch)}>Edit</button>
-                    <button className="btn-delete" onClick={() => handleDelete(branch.id)}>Delete</button>
-                  </div>
-                </td>
+                {canManageBranches && (
+                  <td>
+                    <div className="action-buttons">
+                      <button className="btn-edit" onClick={() => handleEdit(branch)}>Edit</button>
+                      <button className="btn-delete" onClick={() => handleDelete(branch.id)}>Delete</button>
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
             {branches.length === 0 && (
               <tr>
-                <td colSpan="5">No branches found.</td>
+                <td colSpan={canManageBranches ? 5 : 4}>No branches found.</td>
               </tr>
             )}
           </tbody>

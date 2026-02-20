@@ -10,14 +10,6 @@ const branchesRoutes = require('./routes/branches');
 const dashboardRoutes = require('./routes/dashboard');
 const employeesRoutes = require('./routes/employees');
 const positionsRoutes = require('./routes/positions');
-const chartOfAccountsRoutes = require('./routes/chartOfAccounts');
-const subcategoriesRoutes = require('./routes/subcategories');
-const journalEntriesRoutes = require('./routes/journalEntries');
-const generalLedgerRoutes = require('./routes/generalLedger');
-const purchasesRoutes = require('./routes/purchases');
-const expensesRoutes = require('./routes/expenses');
-const salaryRecordsRoutes = require('./routes/salaryRecords');
-const advanceRecordsRoutes = require('./routes/advanceRecords');
 const { initDatabase } = require('./database/init');
 
 const app = express();
@@ -65,9 +57,7 @@ app.get('/', (req, res) => {
       branches: '/api/branches',
       dashboard: '/api/dashboard',
       employees: '/api/employees',
-      positions: '/api/positions',
-      chartOfAccounts: '/api/chart-of-accounts',
-      subcategories: '/api/subcategories'
+      positions: '/api/positions'
     },
     documentation: 'See README.md for API documentation'
   });
@@ -103,15 +93,6 @@ app.use('/api/branches', branchesRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/employees', employeesRoutes);
 app.use('/api/positions', positionsRoutes);
-app.use('/api/chart-of-accounts', chartOfAccountsRoutes);
-app.use('/api/subcategories', subcategoriesRoutes);
-app.use('/api/journal-entries', journalEntriesRoutes);
-app.use('/api/general-ledger', generalLedgerRoutes);
-app.use('/api/purchases', purchasesRoutes);
-app.use('/api/expenses', expensesRoutes);
-app.use('/api/salary-records', salaryRecordsRoutes);
-app.use('/api/advance-records', advanceRecordsRoutes);
-app.use('/api/vat', require('./routes/vat'));
 
 // Serve React app in production for a single combined frontend+backend runtime.
 if (process.env.NODE_ENV === 'production' && fs.existsSync(clientBuildPath)) {
