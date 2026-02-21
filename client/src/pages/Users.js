@@ -74,11 +74,26 @@ const Users = () => {
         const accessToken = sessionData?.session?.access_token;
         if (!accessToken) throw new Error('Session expired. Please log in again.');
 
-        const response = await axios.get('/api/auth/supabase/users', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          timeout: requestTimeoutMs
-        });
-        setUsers(response.data.users || []);
+        try {
+          const response = await axios.get('/api/auth/supabase/users', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            timeout: requestTimeoutMs
+          });
+          setUsers(response.data.users || []);
+        } catch (apiError) {
+          // Fallback for deployments where backend /api is unavailable.
+          const { data, error } = await supabase
+            .from('users')
+            .select('id, username, email, full_name, role, receives_transportation, created_at, branch_id, branches(name)')
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          const mapped = (data || []).map((u) => ({
+            ...u,
+            role: u.role === 'rider_incharge' ? 'night_manager' : u.role,
+            branch_name: u.branches?.name || null
+          }));
+          setUsers(mapped);
+        }
       } else {
         const response = await axios.get('/api/auth/users');
         setUsers(response.data.users);
