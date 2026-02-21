@@ -91,6 +91,7 @@ const Dashboard = () => {
     dailySales: [],
     totalQRSales: 0,
     totalCashSales: 0,
+    totalDeliveryCollected: 0,
     totalRiderPayment: 0,
     totalTransportation: 0,
     transportationByRecipient: []
@@ -159,11 +160,13 @@ const Dashboard = () => {
           const amount = parseFloat(r.amount) || 0;
           const qr = parseFloat(r.total_qr_sales) || 0;
           const cash = parseFloat(r.total_cash_sales) || 0;
+          const deliveryCollected = parseFloat(r.delivery_charge_collected) || 0;
           const rider = parseFloat(r.total_rider_payment) || 0;
           const transportation = parseFloat(r.transportation_amount) || 0;
           acc.totalSales += amount;
           acc.totalQRSales += qr;
           acc.totalCashSales += cash;
+          acc.totalDeliveryCollected += deliveryCollected;
           acc.totalRiderPayment += rider;
           acc.totalTransportation += transportation;
           if (String(r.date || '').slice(0, 10) === today) acc.todaySales += amount;
@@ -241,7 +244,7 @@ const Dashboard = () => {
       if (isSupabaseMode) {
         const { data, error: empErr } = await supabase
           .from('employees')
-          .select('id, name, post, id_document_path, driving_license_document_path')
+          .select('id, name, post, id_document_path, driving_license_document_path, is_active')
           .eq('is_active', 1);
         if (empErr) throw empErr;
         employees = data || [];
@@ -249,7 +252,11 @@ const Dashboard = () => {
         const response = await axios.get('/api/employees');
         employees = response.data?.employees || [];
       }
-      const missing = employees
+      const activeEmployees = (employees || []).filter((employee) => {
+        if (employee?.is_active === undefined || employee?.is_active === null) return true;
+        return employee.is_active === 1 || employee.is_active === true;
+      });
+      const missing = activeEmployees
         .filter((employee) => {
           const isRider = employee.post && employee.post.toLowerCase() === 'rider';
           const missingId = !employee.id_document_path;
@@ -425,16 +432,16 @@ const Dashboard = () => {
           <div className="stat-value">{formatCurrency(stats?.monthSales)}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Total Records</div>
-          <div className="stat-value">{stats?.totalRecords || 0}</div>
-        </div>
-        <div className="stat-card">
           <div className="stat-label">Total QR Sales</div>
           <div className="stat-value">{formatCurrency(stats?.totalQRSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Cash Sales</div>
           <div className="stat-value">{formatCurrency(stats?.totalCashSales)}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Total Delivery Collect</div>
+          <div className="stat-value">{formatCurrency(stats?.totalDeliveryCollected)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Rider Payment</div>

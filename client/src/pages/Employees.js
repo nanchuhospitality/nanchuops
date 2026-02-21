@@ -100,6 +100,15 @@ const Employees = () => {
     return () => clearTimeout(timer);
   }, [loading]);
 
+  useEffect(() => {
+    if (!submitting) return undefined;
+    const timer = setTimeout(() => {
+      setSubmitting(false);
+      setFormError((prev) => prev || 'Saving timed out. Please try again.');
+    }, REQUEST_TIMEOUT_MS + 5000);
+    return () => clearTimeout(timer);
+  }, [submitting]);
+
   const fetchPositions = async () => {
     try {
       if (isSupabaseMode) {
@@ -948,7 +957,7 @@ const Employees = () => {
                 employees
                   .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
                   .map((employee) => {
-                  const missingDocuments = getMissingDocuments(employee);
+                  const missingDocuments = currentTab === 'past' ? [] : getMissingDocuments(employee);
                   return (
                   <tr key={employee.id}>
                     <td className="col-name">

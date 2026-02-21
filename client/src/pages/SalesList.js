@@ -12,6 +12,7 @@ const SalesList = () => {
   const [records, setRecords] = useState([]);
   const [branches, setBranches] = useState([]);
   const [branchFilter, setBranchFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionMenuOpen, setActionMenuOpen] = useState(null);
@@ -34,6 +35,10 @@ const SalesList = () => {
       fetchRecords();
     }
   }, [branchFilter, user?.role, isSupabaseMode]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [branchFilter, dateFilter]);
 
   useEffect(() => {
     if (!loading) return undefined;
@@ -539,28 +544,73 @@ const SalesList = () => {
     viewWindow.document.close();
   };
 
+  const parseRecordDate = (value) => {
+    const raw = String(value || '').slice(0, 10);
+    const [year, month, day] = raw.split('-').map((part) => parseInt(part, 10));
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day);
+  };
+
+  const latestWeekStart = (() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - 6);
+    return d;
+  })();
+
+  const filteredRecords = (records || []).filter((record) => {
+    if (dateFilter) {
+      return String(record.date || '').slice(0, 10) === dateFilter;
+    }
+    const recordDate = parseRecordDate(record.date);
+    if (!recordDate) return false;
+    recordDate.setHours(0, 0, 0, 0);
+    return recordDate >= latestWeekStart;
+  });
+  const paginatedRecords = filteredRecords.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
     <div className="sales-list">
       <div className="page-header">
         <h1>Sales Record</h1>
         <div className="header-actions">
-          {user?.role === 'admin' && (
-            <div className="branch-filter-dropdown">
-              <select
-                className="branch-filter-select"
-                value={branchFilter}
-                onChange={(e) => setBranchFilter(e.target.value)}
-              >
-                <option value="">All Branches</option>
-                {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-              <span className="branch-filter-caret" aria-hidden="true">▼</span>
+          <div className="sales-filters-stack">
+            {user?.role === 'admin' && (
+              <div className="branch-filter-dropdown">
+                <select
+                  className="branch-filter-select"
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                >
+                  <option value="">All Branches</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="branch-filter-caret" aria-hidden="true">▼</span>
+              </div>
+            )}
+            <div className="date-filter-group">
+              <input
+                type="date"
+                className="date-filter-input"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                aria-label="Filter by date"
+              />
+              {dateFilter && (
+                <button
+                  type="button"
+                  className="date-filter-clear"
+                  onClick={() => setDateFilter('')}
+                >
+                  Clear
+                </button>
+              )}
             </div>
-          )}
+          </div>
           <Link to={branchPath('sales/new')} className="btn-new">
             + New Sales Record
           </Link>
@@ -569,19 +619,24 @@ const SalesList = () => {
 
       {error && <div className="error-message">{error}</div>}
 
-      {records.length === 0 ? (
+      {filteredRecords.length === 0 ? (
         <div className="empty-state">
-          <p>No sales records found. Create your first record!</p>
-          <Link to={branchPath('sales/new')} className="btn-primary">
-            Create Sales Record
-          </Link>
+          <p>
+            {records.length === 0
+              ? 'No sales records found. Create your first record!'
+              : 'No sales records match the selected filter.'}
+          </p>
+          {records.length === 0 && (
+            <Link to={branchPath('sales/new')} className="btn-primary">
+              Create Sales Record
+            </Link>
+          )}
         </div>
       ) : (
         <div className="table-container">
           <table className="sales-table">
             <thead>
               <tr>
-                <th>Record #</th>
                 <th>Branch</th>
                 <th>Date</th>
                 <th>Total Sales</th>
@@ -593,13 +648,12 @@ const SalesList = () => {
               </tr>
             </thead>
             <tbody>
-              {records.map((record) => {
+              {paginatedRecords.map((record) => {
                 const totalExpenses = calculateTotalExpenses(record);
                 const cashSales = parseFloat(record.total_cash_sales) || 0;
                 const cashRemaining = cashSales - totalExpenses;
                 return (
                   <tr key={record.id}>
-                    <td className="record-number-cell">{record.record_number || '-'}</td>
                     <td>{record.branch_name || '-'}</td>
                     <td>{formatDate(record.date)}</td>
                     <td className="amount">{formatCurrency(record.amount || 0)}</td>
@@ -676,9 +730,9 @@ const SalesList = () => {
           
           <Pagination
             currentPage={currentPage}
-            totalPages={Math.ceil(records.length / itemsPerPage)}
+            totalPages={Math.ceil(filteredRecords.length / itemsPerPage)}
             onPageChange={setCurrentPage}
-            totalItems={records.length}
+            totalItems={filteredRecords.length}
             itemsPerPage={itemsPerPage}
           />
         </div>

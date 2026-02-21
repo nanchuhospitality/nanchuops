@@ -285,7 +285,9 @@
 
   .dashboard-header-actions {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
+    align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
   }
 
@@ -297,6 +299,7 @@
   .branch-filter-dropdown {
     min-width: 0;
     width: 100%;
+    order: 2;
   }
 
   .dashboard-filters {
@@ -313,8 +316,10 @@
   }
 
   .doc-notification-menu {
-    width: 280px;
-    right: -20px;
+    width: min(92vw, 340px);
+    right: auto;
+    left: 0;
+    top: calc(100% + 6px);
   }
 
   .charts-grid {

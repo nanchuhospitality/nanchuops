@@ -91,6 +91,12 @@ router.get('/stats', authenticateToken, async (req, res) => {
       params
     );
 
+    // Total Delivery Collected
+    const totalDeliveryCollectedResult = await db.query(
+      `SELECT SUM(delivery_charge_collected) as total FROM sales_records ${whereClause}`,
+      params
+    );
+
     // Total Rider Payment
     const totalRiderPaymentResult = await db.query(
       `SELECT SUM(total_rider_payment) as total FROM sales_records ${whereClause}`,
@@ -149,6 +155,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       dailySales: dailySalesResult.rows || [],
       totalQRSales: parseFloat(totalQRSalesResult.rows[0]?.total || 0),
       totalCashSales: parseFloat(totalCashSalesResult.rows[0]?.total || 0),
+      totalDeliveryCollected: parseFloat(totalDeliveryCollectedResult.rows[0]?.total || 0),
       totalRiderPayment: parseFloat(totalRiderPaymentResult.rows[0]?.total || 0),
       totalTransportation: parseFloat(totalTransportationResult.rows[0]?.total || 0),
       dateFrom: date_from || null,

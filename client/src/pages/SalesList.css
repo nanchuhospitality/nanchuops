@@ -22,6 +22,38 @@
   align-items: center;
 }
 
+.sales-filters-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.date-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.date-filter-input {
+  height: 42px;
+  border: 1px solid #d6dbe3;
+  border-radius: 10px;
+  padding: 0 0.75rem;
+  background: #fff;
+  color: #243447;
+  font-size: 0.92rem;
+}
+
+.date-filter-clear {
+  height: 42px;
+  border: 1px solid #d6dbe3;
+  border-radius: 10px;
+  background: #fff;
+  color: #334155;
+  padding: 0 0.75rem;
+  cursor: pointer;
+}
+
 .branch-filter-dropdown {
   position: relative;
   min-width: 220px;
@@ -595,6 +627,19 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  .sales-filters-stack {
+    width: 100%;
+  }
+
+  .date-filter-group {
+    width: 100%;
+  }
+
+  .date-filter-input {
+    flex: 1;
+    width: 100%;
   }
 
   .branch-filter-dropdown {

@@ -10,6 +10,7 @@ if (process.env.NODE_ENV === 'production' && process.env.REACT_APP_API_URL) {
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
+  const PROFILE_CACHE_KEY = 'nova_auth_profile_cache_v1';
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authProvider, setAuthProvider] = useState(isSupabaseConfigured ? 'supabase' : 'legacy');
@@ -29,6 +30,7 @@ export const AuthProvider = ({ children }) => {
 
   const mapProfileToUser = (profile) => ({
     id: profile.id,
+    auth_user_id: profile.auth_user_id || null,
     username: profile.username || '',
     email: profile.email || '',
     full_name: profile.full_name || '',
@@ -38,12 +40,39 @@ export const AuthProvider = ({ children }) => {
     branch_code: profile.branches?.code || null
   });
 
+  const readCachedProfile = () => {
+    try {
+      const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_err) {
+      return null;
+    }
+  };
+
+  const writeCachedProfile = (profile) => {
+    try {
+      if (profile) {
+        localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
+      } else {
+        localStorage.removeItem(PROFILE_CACHE_KEY);
+      }
+    } catch (_err) {
+      // ignore cache write issues
+    }
+  };
+
   const fetchSupabaseProfile = async (authUserId) => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, username, email, full_name, role, branch_id, branches(name, code)')
-      .eq('auth_user_id', authUserId)
-      .maybeSingle();
+    const { data, error } = await withTimeout(
+      supabase
+        .from('users')
+        .select('id, auth_user_id, username, email, full_name, role, branch_id, branches(name, code)')
+        .eq('auth_user_id', authUserId)
+        .maybeSingle(),
+      8000,
+      'Profile query timed out'
+    );
 
     if (error) throw error;
     if (!data) return null;
@@ -52,34 +81,64 @@ export const AuthProvider = ({ children }) => {
 
   const bootstrapSupabaseAuth = async () => {
     try {
-      const { data, error } = await supabase.auth.getSession();
+      const { data, error } = await withTimeout(
+        supabase.auth.getSession(),
+        8000,
+        'Session check timed out'
+      );
       if (error) throw error;
 
       const session = data?.session;
       if (session?.user?.id) {
         const profile = await fetchSupabaseProfile(session.user.id);
-        setUser(profile);
+        const cached = readCachedProfile();
+        const fallback = cached && String(cached.auth_user_id || '') === String(session.user.id) ? cached : null;
+        const resolved = profile || fallback;
+        setUser(resolved);
+        writeCachedProfile(resolved);
       } else {
         setUser(null);
+        writeCachedProfile(null);
       }
     } catch (err) {
       console.error('Supabase auth bootstrap failed:', err);
-      setUser(null);
+      const cached = readCachedProfile();
+      if (cached) {
+        setUser(cached);
+      } else {
+        setUser(null);
+        writeCachedProfile(null);
+      }
     } finally {
       setLoading(false);
     }
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       try {
         if (session?.user?.id) {
-          const profile = await fetchSupabaseProfile(session.user.id);
-          setUser(profile);
+          const profile = await withTimeout(
+            fetchSupabaseProfile(session.user.id),
+            8000,
+            'Profile refresh timed out'
+          );
+          const cached = readCachedProfile();
+          const fallback = cached && String(cached.auth_user_id || '') === String(session.user.id) ? cached : null;
+          const resolved = profile || fallback;
+          setUser(resolved);
+          writeCachedProfile(resolved);
         } else {
           setUser(null);
+          writeCachedProfile(null);
         }
       } catch (err) {
         console.error('Supabase auth state update failed:', err);
-        setUser(null);
+        const cached = readCachedProfile();
+        if (cached) {
+          setUser(cached);
+        } else {
+          setUser(null);
+          writeCachedProfile(null);
+        }
       } finally {
         setLoading(false);
       }
@@ -92,10 +151,14 @@ export const AuthProvider = ({ children }) => {
     if (isSupabaseConfigured) {
       setAuthProvider('supabase');
       let unsubscribe = null;
+      const failSafeTimer = setTimeout(() => {
+        setLoading(false);
+      }, 12000);
       bootstrapSupabaseAuth().then((fn) => {
         unsubscribe = fn;
       });
       return () => {
+        clearTimeout(failSafeTimer);
         if (typeof unsubscribe === 'function') unsubscribe();
       };
     }
@@ -238,6 +301,7 @@ export const AuthProvider = ({ children }) => {
     if (isSupabaseConfigured) {
       supabase.auth.signOut().catch((err) => console.error('Supabase logout failed:', err));
       setUser(null);
+      writeCachedProfile(null);
       return;
     }
 

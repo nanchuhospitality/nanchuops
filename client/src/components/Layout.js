@@ -72,7 +72,9 @@ const Layout = () => {
       <nav className="navbar">
         <div className="nav-container">
           <div className="nav-brand">
-            <h2>Nanchu Hospitality – Operations</h2>
+            <Link to={branchPath('dashboard')}>
+              <h2>Nanchu Hospitality – Operations</h2>
+            </Link>
           </div>
           <button
             type="button"
