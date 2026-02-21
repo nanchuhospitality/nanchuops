@@ -217,6 +217,10 @@
   margin-left: auto;
 }
 
+.nav-user-mobile {
+  display: none;
+}
+
 .user-avatar {
   width: 36px;
   height: 36px;
@@ -284,6 +288,16 @@
     gap: 1rem;
   }
 
+  .nav-brand {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .nav-brand h2 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .mobile-menu-toggle {
     display: inline-flex;
     margin-left: auto;
@@ -303,6 +317,8 @@
     padding: 0.75rem;
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
     z-index: 1002;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
   }
 
   .nav-links.mobile-open {
@@ -327,13 +343,40 @@
     background: #e5e7eb;
   }
 
-  .nav-user {
+  .nav-user-desktop {
     margin-left: 0.5rem;
     order: 3;
+    display: none;
   }
 
   .user-info {
     display: none;
+  }
+
+  .nav-user-mobile {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-top: 0.4rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid #e5e7eb;
+  }
+
+  .nav-user-mobile .user-info {
+    display: flex;
+    color: #1f2937;
+  }
+
+  .nav-user-mobile .user-avatar {
+    background: #e5e7eb;
+    color: #1f2937;
+  }
+
+  .nav-user-mobile .logout-btn {
+    margin-left: auto;
+    background: #111827;
+    border-color: #111827;
+    color: #fff;
   }
 
   .mega-menu {

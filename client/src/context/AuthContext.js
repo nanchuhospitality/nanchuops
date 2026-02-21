@@ -144,10 +144,27 @@ export const AuthProvider = ({ children }) => {
             email = data;
           } catch (lookupError) {
             console.error('Username lookup failed:', lookupError);
-            return {
-              success: false,
-              error: 'Username lookup failed. Please sign in with your email instead of username.'
-            };
+            try {
+              const fallback = await withTimeout(
+                axios.post('/api/auth/resolve-login-email', { username: identifier }),
+                7000,
+                'Fallback username lookup timed out'
+              );
+              const fallbackEmail = fallback?.data?.email;
+              if (!fallbackEmail) {
+                return {
+                  success: false,
+                  error: 'Username lookup failed. Please sign in with your email instead of username.'
+                };
+              }
+              email = fallbackEmail;
+            } catch (fallbackError) {
+              console.error('Fallback username lookup failed:', fallbackError);
+              return {
+                success: false,
+                error: 'Username lookup failed. Please sign in with your email instead of username.'
+              };
+            }
           }
         }
 

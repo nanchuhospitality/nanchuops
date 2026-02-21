@@ -87,7 +87,7 @@ const Layout = () => {
                 <div className="mega-menu">
                   <div className="mega-menu-content">
                     <div className="mega-menu-section">
-                      <Link to={branchPath('sales')} className={`mega-menu-item ${isActive('sales') ? 'active' : ''}`}>
+                      <Link to={branchPath('sales')} className={`mega-menu-item ${isActive('sales') ? 'active' : ''}`} onClick={() => setMobileMenuOpen(false)}>
                         <div className="mega-menu-item-title">Sales Records</div>
                       </Link>
                     </div>
@@ -113,10 +113,10 @@ const Layout = () => {
                 <div className="mega-menu">
                   <div className="mega-menu-content">
                     <div className="mega-menu-section">
-                      <Link to={branchPath('employees')} className={`mega-menu-item ${isActive('employees') ? 'active' : ''}`}>
+                      <Link to={branchPath('employees')} className={`mega-menu-item ${isActive('employees') ? 'active' : ''}`} onClick={() => setMobileMenuOpen(false)}>
                         <div className="mega-menu-item-title">Employees</div>
                       </Link>
-                      <Link to={branchPath('positions')} className={`mega-menu-item ${isActive('positions') ? 'active' : ''}`}>
+                      <Link to={branchPath('positions')} className={`mega-menu-item ${isActive('positions') ? 'active' : ''}`} onClick={() => setMobileMenuOpen(false)}>
                         <div className="mega-menu-item-title">Positions</div>
                       </Link>
                     </div>
@@ -139,9 +139,27 @@ const Layout = () => {
                 <span className="link-text">Branches</span>
               </Link>
             )}
+            <div className="nav-user-mobile">
+              <div className="user-avatar">{getInitials(user?.full_name || user?.username || 'NA')}</div>
+              <div className="user-info">
+                <div className="user-name">{user?.full_name || user?.username || 'User'}</div>
+                <div className="user-role">
+                  {user?.role === 'night_manager'
+                    ? 'Night Manager'
+                    : user?.role === 'admin'
+                    ? 'Admin'
+                    : user?.role === 'branch_admin'
+                    ? 'Branch Admin'
+                    : 'Employee'}
+                </div>
+              </div>
+              <button onClick={logout} className="logout-btn">
+                Logout
+              </button>
+            </div>
           </div>
 
-          <div className="nav-user">
+          <div className="nav-user nav-user-desktop">
             <div className="user-avatar">{getInitials(user?.full_name || user?.username || 'NA')}</div>
             <div className="user-info">
               <div className="user-name">{user?.full_name || user?.username || 'User'}</div>

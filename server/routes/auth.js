@@ -266,6 +266,37 @@ router.post('/supabase/register',
   }
 );
 
+// Resolve login email by username (fallback for Supabase username login)
+router.post('/resolve-login-email',
+  [
+    body('username').trim().notEmpty().withMessage('Username is required')
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const username = String(req.body.username || '').trim();
+      const db = getDb();
+      const result = await db.query(
+        'SELECT email FROM users WHERE lower(username) = lower($1) LIMIT 1',
+        [username]
+      );
+
+      if (result.rows.length === 0 || !result.rows[0].email) {
+        return res.status(404).json({ error: 'Username not found' });
+      }
+
+      return res.json({ email: result.rows[0].email });
+    } catch (error) {
+      console.error('Error in resolve-login-email route:', error);
+      return res.status(500).json({ error: 'Unable to resolve login email' });
+    }
+  }
+);
+
 // Login
 router.post('/login',
   [

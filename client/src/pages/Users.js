@@ -240,12 +240,6 @@ const Users = () => {
       </div>
 
       {error && <div className="error-message">{error}</div>}
-      {isSupabaseMode && (
-        <div className="error-message" style={{ background: '#eef7ff', color: '#1f4d7a', borderColor: '#d6e8f8' }}>
-          Supabase mode is active. New users are created through a secure backend endpoint and synced to profiles automatically.
-        </div>
-      )}
-
       {showForm && (
         <div className="form-container">
           <h2>{editingUserId ? (isSupabaseMode ? 'Edit User Role/Branch' : 'Edit User') : 'Create New User'}</h2>

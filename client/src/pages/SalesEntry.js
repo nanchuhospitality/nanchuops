@@ -124,6 +124,9 @@ const SalesEntry = () => {
       });
     } catch (err) {
       console.error('Failed to load branches:', err);
+      if (currentUser?.role !== 'admin' && currentUser?.branch_id) {
+        setFormData((prev) => ({ ...prev, branch_id: String(currentUser.branch_id) }));
+      }
     }
   }, [currentUser?.branch_id, currentUser?.role]);
 
@@ -347,6 +350,20 @@ const SalesEntry = () => {
     return totals;
   };
 
+  const assignedBranchOption = currentUser?.branch_id
+    ? {
+        id: currentUser.branch_id,
+        name: currentUser.branch_name || `Branch #${currentUser.branch_id}`
+      }
+    : null;
+  const branchOptions = (() => {
+    const safeBranches = Array.isArray(branches) ? branches : [];
+    if (currentUser?.role === 'admin') return safeBranches;
+    if (!assignedBranchOption) return safeBranches;
+    const hasAssigned = safeBranches.some((branch) => String(branch.id) === String(assignedBranchOption.id));
+    return hasAssigned ? safeBranches : [assignedBranchOption, ...safeBranches];
+  })();
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -456,14 +473,14 @@ const SalesEntry = () => {
                 disabled={loading || currentUser?.role !== 'admin'}
               >
                 <option value="">Select branch</option>
-                {branches.map((branch) => (
+                {branchOptions.map((branch) => (
                   <option key={branch.id} value={branch.id}>
                     {branch.name}
                   </option>
                 ))}
               </select>
               {currentUser?.role !== 'admin' && (
-                <small className="field-hint">Branch is assigned from your user profile.</small>
+                <small className="field-hint">Branch is assigned from your user profile and shown here.</small>
               )}
             </div>
           </div>
