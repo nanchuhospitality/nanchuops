@@ -9,17 +9,35 @@ const Layout = () => {
   const { branchslug } = useParams();
   const [openDropdowns, setOpenDropdowns] = useState({});
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobileNav, setIsMobileNav] = useState(
+    typeof window !== 'undefined' ? window.innerWidth <= 1024 : false
+  );
 
   const activeBranchSlug = branchslug || user?.branch_code || 'main';
   const branchPath = (path) => `/${activeBranchSlug}/${path}`;
   const isActive = (path) => location.pathname === branchPath(path) || location.pathname.startsWith(branchPath(path) + '/');
+  const isAdminMobile = user?.role === 'admin' && isMobileNav;
 
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
+  useEffect(() => {
+    const onResize = () => {
+      setIsMobileNav(window.innerWidth <= 1024);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) {
+      setOpenDropdowns({});
+    }
+  }, [mobileMenuOpen]);
+
   const toggleDropdown = (dropdownName) => {
-    setOpenDropdowns(prev => ({
+    setOpenDropdowns((prev) => ({
       ...prev,
       [dropdownName]: !prev[dropdownName]
     }));
@@ -74,16 +92,16 @@ const Layout = () => {
                 <span className="link-text">Dashboard</span>
               </Link>
             )}
-            {user?.role === 'admin' && (
+            {user?.role === 'admin' && !isAdminMobile && (
               <div 
                 className={`nav-dropdown ${isActive('sales') ? 'active-parent' : ''} ${isDropdownOpen('operations', isActive('sales')) ? 'open' : ''}`}
                 onMouseEnter={() => openDropdown('operations')}
                 onMouseLeave={() => closeDropdown('operations')}
               >
-                <span className="nav-dropdown-toggle" onClick={() => toggleDropdown('operations')}>
+                <button type="button" className="nav-dropdown-toggle" onClick={() => toggleDropdown('operations')}>
                   <span className="link-text">Operations</span>
                   <span className="dropdown-arrow">▼</span>
-                </span>
+                </button>
                 <div className="mega-menu">
                   <div className="mega-menu-content">
                     <div className="mega-menu-section">
@@ -95,21 +113,26 @@ const Layout = () => {
                 </div>
               </div>
             )}
+            {isAdminMobile && (
+              <Link to={branchPath('sales')} className={isActive('sales') ? 'active' : ''} onClick={() => setMobileMenuOpen(false)}>
+                <span className="link-text">Sales Records</span>
+              </Link>
+            )}
             {user?.role !== 'admin' && (
               <Link to={branchPath('sales')} className={isActive('sales') ? 'active' : ''} onClick={() => setMobileMenuOpen(false)}>
                 <span className="link-text">Sales Records</span>
               </Link>
             )}
-            {user?.role === 'admin' && (
+            {user?.role === 'admin' && !isAdminMobile && (
               <div 
                 className={`nav-dropdown ${isActive('employees') || isActive('positions') ? 'active-parent' : ''} ${isDropdownOpen('employees', isActive('employees') || isActive('positions')) ? 'open' : ''}`}
                 onMouseEnter={() => openDropdown('employees')}
                 onMouseLeave={() => closeDropdown('employees')}
               >
-                <span className="nav-dropdown-toggle" onClick={() => toggleDropdown('employees')}>
+                <button type="button" className="nav-dropdown-toggle" onClick={() => toggleDropdown('employees')}>
                   <span className="link-text">Employees</span>
                   <span className="dropdown-arrow">▼</span>
-                </span>
+                </button>
                 <div className="mega-menu">
                   <div className="mega-menu-content">
                     <div className="mega-menu-section">
@@ -123,6 +146,16 @@ const Layout = () => {
                   </div>
                 </div>
               </div>
+            )}
+            {isAdminMobile && (
+              <>
+                <Link to={branchPath('employees')} className={isActive('employees') ? 'active' : ''} onClick={() => setMobileMenuOpen(false)}>
+                  <span className="link-text">Employees</span>
+                </Link>
+                <Link to={branchPath('positions')} className={isActive('positions') ? 'active' : ''} onClick={() => setMobileMenuOpen(false)}>
+                  <span className="link-text">Positions</span>
+                </Link>
+              </>
             )}
             {(user?.role === 'night_manager' || user?.role === 'branch_admin') && (
               <Link to={branchPath('employees')} className={isActive('employees') ? 'active' : ''} onClick={() => setMobileMenuOpen(false)}>

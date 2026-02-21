@@ -592,9 +592,14 @@
 
   .header-actions {
     width: 100%;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 0.5rem;
+  }
+
+  .branch-filter-dropdown {
+    min-width: 0;
+    width: 100%;
   }
 
   .btn-share,
@@ -616,6 +621,15 @@
 
   .action-buttons {
     flex-direction: column;
+  }
+
+  .action-dropdown-menu {
+    min-width: 0;
+    width: min(220px, calc(100vw - 16px));
+  }
+
+  .action-dropdown-item {
+    padding: 0.85rem 1rem;
   }
 
   .view-modal {

@@ -15,7 +15,7 @@ const SalesList = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionMenuOpen, setActionMenuOpen] = useState(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const { user, authProvider } = useContext(AuthContext);
@@ -35,6 +35,15 @@ const SalesList = () => {
     }
   }, [branchFilter, user?.role, isSupabaseMode]);
 
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
   const fetchRecords = async () => {
     try {
       if (isSupabaseMode) {
@@ -42,8 +51,14 @@ const SalesList = () => {
           .from('sales_records')
           .select('*, branches(name), users(username, full_name)')
           .order('date', { ascending: false });
-        if (user?.role === 'admin' && branchFilter) {
-          query = query.eq('branch_id', parseInt(branchFilter, 10));
+        if (user?.role === 'admin') {
+          if (branchFilter) {
+            query = query.eq('branch_id', parseInt(branchFilter, 10));
+          }
+        } else if (user?.branch_id) {
+          query = query.eq('branch_id', user.branch_id);
+        } else {
+          query = query.eq('id', -1);
         }
         const { data, error: qErr } = await query;
         if (qErr) throw qErr;
@@ -528,7 +543,7 @@ const SalesList = () => {
     <div className="sales-list">
       <div className="page-header">
         <h1>Sales Record</h1>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div className="header-actions">
           {user?.role === 'admin' && (
             <div className="branch-filter-dropdown">
               <select
@@ -605,9 +620,11 @@ const SalesList = () => {
                           } else {
                             const button = e.currentTarget;
                             const rect = button.getBoundingClientRect();
+                            const menuWidth = window.innerWidth <= 768 ? Math.min(220, window.innerWidth - 16) : 160;
+                            const left = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
                             setDropdownPosition({
                               top: rect.bottom + window.scrollY + 4,
-                              right: window.innerWidth - rect.right
+                              left
                             });
                             setActionMenuOpen(record.id);
                           }
@@ -626,7 +643,7 @@ const SalesList = () => {
                             className="action-dropdown-menu"
                             style={{
                               top: `${dropdownPosition.top}px`,
-                              right: `${dropdownPosition.right}px`
+                              left: `${dropdownPosition.left}px`
                             }}
                           >
                             <button

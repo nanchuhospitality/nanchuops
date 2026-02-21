@@ -58,6 +58,20 @@ const Employees = () => {
   const { user, authProvider } = useContext(AuthContext);
   const isSupabaseMode = authProvider === 'supabase';
   const DOCUMENT_BUCKET = 'employee-documents';
+  const REQUEST_TIMEOUT_MS = 15000;
+  const withTimeout = async (promise, ms = REQUEST_TIMEOUT_MS, message = 'Request timed out') => {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
 
   useEffect(() => {
     fetchPositions();
@@ -76,6 +90,15 @@ const Employees = () => {
       setFormData((prev) => ({ ...prev, post: 'Rider' }));
     }
   }, [user?.role]);
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   const fetchPositions = async () => {
     try {
@@ -167,10 +190,14 @@ const Employees = () => {
     const extension = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
     const filename = `${type}-${Date.now()}-${Math.round(Math.random() * 1e6)}.${extension}`;
     const path = `${employeeId}/${filename}`;
-    const { error } = await supabase.storage.from(DOCUMENT_BUCKET).upload(path, file, {
-      upsert: true,
-      contentType: file.type || undefined
-    });
+    const { error } = await withTimeout(
+      supabase.storage.from(DOCUMENT_BUCKET).upload(path, file, {
+        upsert: true,
+        contentType: file.type || undefined
+      }),
+      REQUEST_TIMEOUT_MS,
+      'Document upload timed out'
+    );
     if (error) throw error;
     return path;
   };
@@ -179,6 +206,7 @@ const Employees = () => {
     e.preventDefault();
     setFormError('');
     const effectivePost = user?.role === 'night_manager' ? 'Rider' : formData.post;
+    const isRiderPosition = String(effectivePost || '').toLowerCase().includes('rider');
     
     // Validate required fields
     if (
@@ -197,7 +225,7 @@ const Employees = () => {
     }
 
     // Rider-specific requirement
-    if (effectivePost && effectivePost.toLowerCase() === 'rider') {
+    if (isRiderPosition) {
       if (!formData.driving_license_number) {
         setFormError('Driving License Number is required for rider position');
         return;
@@ -245,10 +273,14 @@ const Employees = () => {
         }
 
         if (editingId) {
-          const { error: updateErr } = await supabase
-            .from('employees')
-            .update(payload)
-            .eq('id', editingId);
+          const { error: updateErr } = await withTimeout(
+            supabase
+              .from('employees')
+              .update(payload)
+              .eq('id', editingId),
+            REQUEST_TIMEOUT_MS,
+            'Employee update timed out'
+          );
           if (updateErr) throw updateErr;
 
           const updates = {};
@@ -259,15 +291,23 @@ const Employees = () => {
             updates.driving_license_document_path = await uploadEmployeeDocument(editingId, drivingLicenseDocument, 'license');
           }
           if (Object.keys(updates).length > 0) {
-            const { error: docErr } = await supabase.from('employees').update(updates).eq('id', editingId);
+            const { error: docErr } = await withTimeout(
+              supabase.from('employees').update(updates).eq('id', editingId),
+              REQUEST_TIMEOUT_MS,
+              'Employee document update timed out'
+            );
             if (docErr) throw docErr;
           }
         } else {
-          const { data: inserted, error: insertErr } = await supabase
-            .from('employees')
-            .insert(payload)
-            .select('id')
-            .single();
+          const { data: inserted, error: insertErr } = await withTimeout(
+            supabase
+              .from('employees')
+              .insert(payload)
+              .select('id')
+              .single(),
+            REQUEST_TIMEOUT_MS,
+            'Employee creation timed out'
+          );
           if (insertErr) throw insertErr;
 
           const updates = {};
@@ -278,7 +318,11 @@ const Employees = () => {
             updates.driving_license_document_path = await uploadEmployeeDocument(inserted.id, drivingLicenseDocument, 'license');
           }
           if (Object.keys(updates).length > 0) {
-            const { error: docErr } = await supabase.from('employees').update(updates).eq('id', inserted.id);
+            const { error: docErr } = await withTimeout(
+              supabase.from('employees').update(updates).eq('id', inserted.id),
+              REQUEST_TIMEOUT_MS,
+              'Employee document update timed out'
+            );
             if (docErr) throw docErr;
           }
         }
@@ -319,9 +363,15 @@ const Employees = () => {
         };
 
         if (editingId) {
-          await axios.put(`/api/employees/${editingId}`, submitData, config);
+          await axios.put(`/api/employees/${editingId}`, submitData, {
+            ...config,
+            timeout: REQUEST_TIMEOUT_MS
+          });
         } else {
-          await axios.post('/api/employees', submitData, config);
+          await axios.post('/api/employees', submitData, {
+            ...config,
+            timeout: REQUEST_TIMEOUT_MS
+          });
         }
       }
       resetForm();
@@ -439,11 +489,15 @@ const Employees = () => {
 
   const getMissingDocuments = (employee) => {
     const missing = [];
+    const isRider = String(employee.post || '').toLowerCase().includes('rider');
+    if (isRider) {
+      if (!employee.driving_license_document_path) {
+        missing.push('Driving License image');
+      }
+      return missing;
+    }
     if (!employee.id_document_path) {
       missing.push('Citizenship ID image');
-    }
-    if (employee.post && employee.post.toLowerCase() === 'rider' && !employee.driving_license_document_path) {
-      missing.push('Driving License image');
     }
     return missing;
   };
@@ -551,7 +605,7 @@ const Employees = () => {
                   >
                     <option value="">Select Position</option>
                     {positions
-                      .filter(position => user?.role === 'admin' || user?.role === 'branch_admin' || position.name.toLowerCase() === 'rider')
+                      .filter(position => user?.role === 'admin' || user?.role === 'branch_admin' || position.name.toLowerCase().includes('rider'))
                       .map((position) => (
                         <option key={position.id} value={position.name}>
                           {position.name}
@@ -652,7 +706,7 @@ const Employees = () => {
               <div className="form-row">
                 <div className="form-group">
                   <label htmlFor="citizenship_number">
-                    Citizenship Number {formData.post && formData.post.toLowerCase() !== 'rider' ? '*' : ''}
+                    Citizenship Number {formData.post && !formData.post.toLowerCase().includes('rider') ? '*' : ''}
                   </label>
                   <input
                     type="text"
@@ -661,7 +715,7 @@ const Employees = () => {
                     value={formData.citizenship_number}
                     onChange={handleChange}
                     placeholder="Citizenship number"
-                    required={!!formData.post && formData.post.toLowerCase() !== 'rider'}
+                    required={!!formData.post && !formData.post.toLowerCase().includes('rider')}
                   />
                 </div>
                 <div className="form-group">
@@ -716,7 +770,7 @@ const Employees = () => {
               )}
               <small className="file-hint">Accepted formats: JPEG, PNG, PDF (Max 5MB)</small>
             </div>
-            {(user?.role === 'night_manager' || (formData.post && formData.post.toLowerCase() === 'rider')) && (
+            {(user?.role === 'night_manager' || (formData.post && formData.post.toLowerCase().includes('rider'))) && (
               <div className="form-section">
                 <h3>Driving License Details</h3>
                 <div className="form-row">

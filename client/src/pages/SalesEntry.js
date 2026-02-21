@@ -2,13 +2,15 @@ import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
+import { supabase } from '../lib/supabaseClient';
 import './SalesEntry.css';
 
 const SalesEntry = () => {
   const { id, branchslug } = useParams();
   const navigate = useNavigate();
   const isEdit = !!id;
-  const { user: currentUser } = useContext(AuthContext);
+  const { user: currentUser, authProvider } = useContext(AuthContext);
+  const isSupabaseMode = authProvider === 'supabase';
   const branchPath = (path) => `/${branchslug || currentUser?.branch_code || 'main'}/${path}`;
 
   const [formData, setFormData] = useState({
@@ -27,19 +29,44 @@ const SalesEntry = () => {
   const [transportationRecipientsList, setTransportationRecipientsList] = useState([{ name: '', amount: '', isCustom: false, employeeId: '' }]);
   const [riderPayments, setRiderPayments] = useState([{ name: '', basePay: '', tips: '', extraKm: '', extraOrder: '', overtime: '', totalOrder: '' }]);
   const [riders, setRiders] = useState([]);
-  const [riderAutocompleteOpen, setRiderAutocompleteOpen] = useState({});
   const [otherExpenses, setOtherExpenses] = useState([{ particulars: '', amount: '' }]);
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const isEmployeeActive = (employee) => employee?.is_active === 1 || employee?.is_active === true;
+  const parseJsonField = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch (_err) {
+        return null;
+      }
+    }
+    return value;
+  };
 
   const fetchRecord = useCallback(async () => {
     if (!id) return;
     try {
-      const response = await axios.get(`/api/sales/${id}`);
-      const record = response.data.record;
+      let record = null;
+      if (isSupabaseMode) {
+        const recordId = parseInt(id, 10);
+        if (!recordId) throw new Error('Invalid sales record id');
+        const { data, error: qErr } = await supabase
+          .from('sales_records')
+          .select('*')
+          .eq('id', recordId)
+          .maybeSingle();
+        if (qErr) throw qErr;
+        if (!data) throw new Error('Sales record not found');
+        record = data;
+      } else {
+        const response = await axios.get(`/api/sales/${id}`);
+        record = response.data.record;
+      }
       setFormData({
-        date: record.date,
+        date: record.date ? String(record.date).split('T')[0] : '',
         branch_id: record.branch_id ? String(record.branch_id) : '',
         description: record.description || '',
         total_qr_sales: record.total_qr_sales || '',
@@ -54,13 +81,13 @@ const SalesEntry = () => {
       // Parse transportation recipients from JSON
       if (record.transportation_recipients) {
         try {
-          const recipients = JSON.parse(record.transportation_recipients);
+          const recipients = parseJsonField(record.transportation_recipients);
           if (Array.isArray(recipients) && recipients.length > 0) {
             setTransportationRecipientsList(recipients.map(r => ({
               name: r.name || '',
               amount: r.amount || '',
               isCustom: r.isCustom || false,
-              employeeId: r.employeeId || ''
+              employeeId: r.employeeId ? String(r.employeeId) : ''
             })));
           }
         } catch (e) {
@@ -71,7 +98,7 @@ const SalesEntry = () => {
       // Parse rider payments from JSON
       if (record.rider_payments) {
         try {
-          const payments = JSON.parse(record.rider_payments);
+          const payments = parseJsonField(record.rider_payments);
           if (Array.isArray(payments) && payments.length > 0) {
             setRiderPayments(payments.map(r => ({
               name: r.name || '',
@@ -91,7 +118,7 @@ const SalesEntry = () => {
       // Parse other expenses from JSON
       if (record.other_expenses) {
         try {
-          const expenses = JSON.parse(record.other_expenses);
+          const expenses = parseJsonField(record.other_expenses);
           if (Array.isArray(expenses) && expenses.length > 0) {
             setOtherExpenses(expenses.map(e => ({
               particulars: e.particulars || '',
@@ -105,12 +132,24 @@ const SalesEntry = () => {
     } catch (err) {
       setError('Failed to load sales record');
     }
-  }, [id]);
+  }, [id, isSupabaseMode]);
 
   const fetchBranches = useCallback(async () => {
     try {
-      const response = await axios.get('/api/branches');
-      const branchRows = Array.isArray(response?.data?.branches) ? response.data.branches : [];
+      let branchRows = [];
+      if (isSupabaseMode) {
+        const { data, error } = await supabase
+          .from('branches')
+          .select('id, name, code, is_active')
+          .eq('is_active', true)
+          .order('name', { ascending: true });
+        if (error) throw error;
+        branchRows = Array.isArray(data) ? data : [];
+      } else {
+        const response = await axios.get('/api/branches');
+        branchRows = Array.isArray(response?.data?.branches) ? response.data.branches : [];
+      }
+
       setBranches(branchRows);
       setFormData((prev) => {
         if (currentUser?.role !== 'admin' && currentUser?.branch_id) {
@@ -128,33 +167,61 @@ const SalesEntry = () => {
         setFormData((prev) => ({ ...prev, branch_id: String(currentUser.branch_id) }));
       }
     }
-  }, [currentUser?.branch_id, currentUser?.role]);
+  }, [isSupabaseMode]);
 
   const fetchTransportationRecipients = useCallback(async () => {
     try {
-      const response = await axios.get('/api/employees/transportation/recipients');
-      const employees = Array.isArray(response?.data?.employees) ? response.data.employees : [];
+      let employees = [];
+      if (isSupabaseMode) {
+        const query = supabase
+          .from('employees')
+          .select('id, name, branch_id, is_active')
+          .order('name', { ascending: true });
+        const { data, error: qErr } = await query;
+        if (qErr) throw qErr;
+        employees = Array.isArray(data) ? data.filter(isEmployeeActive) : [];
+      } else {
+        const response = await axios.get('/api/employees/transportation/recipients');
+        employees = Array.isArray(response?.data?.employees)
+          ? response.data.employees.filter(isEmployeeActive)
+          : [];
+      }
       setTransportationRecipients(employees);
     } catch (err) {
       console.error('Failed to load transportation recipients:', err);
       setTransportationRecipients([]);
     }
-  }, []);
+  }, [currentUser?.branch_id, currentUser?.role, isSupabaseMode]);
 
   const fetchRiders = useCallback(async () => {
     try {
-      const response = await axios.get('/api/employees');
-      const employees = Array.isArray(response?.data?.employees) ? response.data.employees : [];
+      let employees = [];
+      if (isSupabaseMode) {
+        const query = supabase
+          .from('employees')
+          .select('id, name, post, branch_id, is_active')
+          .ilike('post', '%rider%')
+          .order('name', { ascending: true })
+          .limit(500);
+        const { data, error: qErr } = await query;
+        if (qErr) throw qErr;
+        employees = Array.isArray(data) ? data.filter(isEmployeeActive) : [];
+      } else {
+        const response = await axios.get('/api/employees');
+        employees = Array.isArray(response?.data?.employees)
+          ? response.data.employees.filter(isEmployeeActive)
+          : [];
+      }
       // Filter employees with rider position
       const riderEmployees = employees.filter(emp => 
-        emp.post && emp.post.toLowerCase() === 'rider'
+        String(emp.post || '').toLowerCase().includes('rider')
       );
       setRiders(riderEmployees);
     } catch (err) {
       console.error('Failed to load riders:', err);
       setRiders([]);
     }
-  }, []);
+  }, [currentUser?.branch_id, currentUser?.role, isSupabaseMode]);
 
   useEffect(() => {
     fetchBranches();
@@ -227,13 +294,11 @@ const SalesEntry = () => {
     if (field === 'isCustom') {
       updated[index] = { ...updated[index], isCustom: value, name: '', employeeId: '' };
     } else if (field === 'employeeId') {
-      const selectedEmployee = transportationRecipients.find(e => {
-        // Handle both string and number comparisons
-        return e.id.toString() === value.toString() || e.id === parseInt(value);
-      });
+      const normalizedEmployeeId = value ? String(value) : '';
+      const selectedEmployee = transportationRecipients.find((e) => String(e.id) === normalizedEmployeeId);
       updated[index] = { 
         ...updated[index], 
-        employeeId: value,
+        employeeId: normalizedEmployeeId,
         name: selectedEmployee ? selectedEmployee.name : '',
         isCustom: false
       };
@@ -255,28 +320,7 @@ const SalesEntry = () => {
   const updateRiderPayment = (index, field, value) => {
     const updated = [...riderPayments];
     updated[index] = { ...updated[index], [field]: value };
-    
-    // If updating name, show autocomplete
-    if (field === 'name') {
-      setRiderAutocompleteOpen({ ...riderAutocompleteOpen, [index]: true });
-    }
-    
     setRiderPayments(updated);
-  };
-
-  const selectRider = (index, riderName) => {
-    const updated = [...riderPayments];
-    updated[index] = { ...updated[index], name: riderName };
-    setRiderPayments(updated);
-    setRiderAutocompleteOpen({ ...riderAutocompleteOpen, [index]: false });
-  };
-
-  const getFilteredRiders = (index) => {
-    const searchTerm = riderPayments[index]?.name?.toLowerCase() || '';
-    if (!searchTerm) return riders;
-    return riders.filter(rider => 
-      rider.name.toLowerCase().includes(searchTerm)
-    );
   };
 
   const addOtherExpense = () => {
@@ -427,14 +471,33 @@ const SalesEntry = () => {
     };
 
     try {
-      if (isEdit) {
+      if (isSupabaseMode) {
+        if (isEdit) {
+          const recordId = parseInt(id, 10);
+          if (!recordId) throw new Error('Invalid sales record id');
+          const { error: uErr } = await supabase
+            .from('sales_records')
+            .update(submitData)
+            .eq('id', recordId);
+          if (uErr) throw uErr;
+        } else {
+          const payload = {
+            ...submitData,
+            user_id: currentUser?.id || null
+          };
+          const { error: iErr } = await supabase
+            .from('sales_records')
+            .insert([payload]);
+          if (iErr) throw iErr;
+        }
+      } else if (isEdit) {
         await axios.put(`/api/sales/${id}`, submitData);
       } else {
         await axios.post('/api/sales', submitData);
       }
       navigate(branchPath('sales'));
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save sales record');
+      setError(err.response?.data?.error || err.message || 'Failed to save sales record');
     } finally {
       setLoading(false);
     }
@@ -518,38 +581,21 @@ const SalesEntry = () => {
                   {riderPayments.map((rider, index) => (
                     <tr key={index}>
                       <td>
-                        <div className="rider-autocomplete-container">
-                          <input
-                            type="text"
-                            value={rider.name}
-                            onChange={(e) => updateRiderPayment(index, 'name', e.target.value)}
-                            onFocus={() => setRiderAutocompleteOpen({ ...riderAutocompleteOpen, [index]: true })}
-                            onBlur={() => {
-                              // Delay to allow click on dropdown item
-                              setTimeout(() => {
-                                setRiderAutocompleteOpen({ ...riderAutocompleteOpen, [index]: false });
-                              }, 200);
-                            }}
-                            placeholder="Type rider name"
-                            className="rider-input"
-                          />
-                          {riderAutocompleteOpen[index] && getFilteredRiders(index).length > 0 && (
-                            <div className="rider-autocomplete-dropdown">
-                              {getFilteredRiders(index).map((riderEmp) => (
-                                <div
-                                  key={riderEmp.id}
-                                  className="rider-autocomplete-item"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    selectRider(index, riderEmp.name);
-                                  }}
-                                >
-                                  {riderEmp.name}
-                                </div>
-                              ))}
-                            </div>
+                        <select
+                          value={rider.name || ''}
+                          onChange={(e) => updateRiderPayment(index, 'name', e.target.value)}
+                          className="rider-input"
+                        >
+                          <option value="">Select rider</option>
+                          {rider.name && !(Array.isArray(riders) ? riders : []).some((r) => r.name === rider.name) && (
+                            <option value={rider.name}>{rider.name}</option>
                           )}
-                        </div>
+                          {(Array.isArray(riders) ? riders : []).map((riderEmp) => (
+                            <option key={riderEmp.id} value={riderEmp.name}>
+                              {riderEmp.name}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td>
                         <input
@@ -701,13 +747,13 @@ const SalesEntry = () => {
                       <td>
                         {!recipient.isCustom ? (
                           <select
-                            value={recipient.employeeId || ''}
+                            value={recipient.employeeId ? String(recipient.employeeId) : ''}
                             onChange={(e) => updateTransportationRecipient(index, 'employeeId', e.target.value)}
                             className="transportation-input"
                           >
                             <option value="">Select employee</option>
                             {(Array.isArray(transportationRecipients) ? transportationRecipients : []).map((emp) => (
-                              <option key={emp.id} value={emp.id}>
+                              <option key={emp.id} value={String(emp.id)}>
                                 {emp.name}
                               </option>
                             ))}

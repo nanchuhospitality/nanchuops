@@ -32,6 +32,19 @@ const Users = () => {
   const itemsPerPage = 10;
   const requestTimeoutMs = 15000;
   const apiBaseUrl = process.env.REACT_APP_API_URL;
+  const withTimeout = async (promise, ms = 8000, message = 'Request timed out') => {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
 
   useEffect(() => {
     if (canManageUsers) {
@@ -57,7 +70,7 @@ const Users = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'users' },
         () => {
-          fetchUsers();
+          fetchUsers(true);
         }
       )
       .subscribe();
@@ -67,43 +80,40 @@ const Users = () => {
     };
   }, [isSupabaseMode, canManageUsers]);
 
-  const fetchUsers = async () => {
+  useEffect(() => {
+    if (canManageUsers) return;
+    setLoading(false);
+    setError('You do not have permission to view users.');
+  }, [canManageUsers]);
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
+  const fetchUsers = async (silent = false) => {
     try {
+      if (!silent) setLoading(true);
+      setError('');
       if (isSupabaseMode) {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) throw sessionError;
-        const accessToken = sessionData?.session?.access_token;
-        if (!accessToken) throw new Error('Session expired. Please log in again.');
-
+        // Prefer direct Supabase query first to avoid slow backend fallback delays.
         try {
-          const backendCandidates = [
-            '/api/auth/supabase/users',
-            apiBaseUrl ? `${apiBaseUrl.replace(/\/$/, '')}/api/auth/supabase/users` : null
-          ].filter(Boolean);
-
-          let backendUsers = null;
-          let backendError = null;
-          for (const endpoint of backendCandidates) {
-            try {
-              const response = await axios.get(endpoint, {
-                headers: { Authorization: `Bearer ${accessToken}` },
-                timeout: requestTimeoutMs
-              });
-              backendUsers = response.data.users || [];
-              break;
-            } catch (endpointError) {
-              backendError = endpointError;
-            }
-          }
-
-          if (!backendUsers) throw backendError || new Error('Backend users endpoint unavailable');
-          setUsers(backendUsers);
-        } catch (apiError) {
-          // Fallback for deployments where backend /api is unavailable.
-          const { data, error } = await supabase
+          let query = supabase
             .from('users')
             .select('id, username, email, full_name, role, receives_transportation, created_at, branch_id, branches(name)')
             .order('created_at', { ascending: false });
+          if (isBranchAdmin && currentUser?.branch_id) {
+            query = query.eq('branch_id', currentUser.branch_id);
+          }
+          const { data, error } = await withTimeout(
+            query,
+            8000,
+            'Users query timed out'
+          );
           if (error) throw error;
           const mapped = (data || []).map((u) => ({
             ...u,
@@ -111,18 +121,46 @@ const Users = () => {
             branch_name: u.branches?.name || null
           }));
           setUsers(mapped);
-          if ((mapped || []).length === 0 && (currentUser?.role === 'admin' || currentUser?.role === 'branch_admin')) {
-            setError('No users returned. Check REACT_APP_API_URL/backend mapping for /api/auth/supabase/users.');
+          if ((mapped || []).length === 0 && canManageUsers) {
+            setError('No users found.');
           }
+          return;
+        } catch (supabaseError) {
+          // Fallback to backend endpoint when direct query fails.
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+          if (sessionError) throw supabaseError;
+          const accessToken = sessionData?.session?.access_token;
+          if (!accessToken) throw supabaseError;
+
+          const backendCandidates = [
+            '/api/auth/supabase/users',
+            apiBaseUrl ? `${apiBaseUrl.replace(/\/$/, '')}/api/auth/supabase/users` : null
+          ].filter(Boolean);
+          let backendUsers = null;
+          let backendError = null;
+          for (const endpoint of backendCandidates) {
+            try {
+              const response = await axios.get(endpoint, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                timeout: 7000
+              });
+              backendUsers = response.data.users || [];
+              break;
+            } catch (endpointError) {
+              backendError = endpointError;
+            }
+          }
+          if (!backendUsers) throw backendError || supabaseError;
+          setUsers(backendUsers);
         }
       } else {
-        const response = await axios.get('/api/auth/users');
+        const response = await axios.get('/api/auth/users', { timeout: 8000 });
         setUsers(response.data.users);
       }
     } catch (err) {
       setError(err.message || 'Failed to load users');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 

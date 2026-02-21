@@ -27,6 +27,15 @@ const Positions = () => {
     fetchPositions();
   }, [isSupabaseMode]);
 
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
   const fetchPositions = async () => {
     try {
       if (isSupabaseMode) {

@@ -8,12 +8,29 @@
 }
 
 .login-card {
+  position: relative;
   background: white;
   padding: 3rem;
   border-radius: 10px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
   width: 100%;
   max-width: 400px;
+}
+
+.login-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 10px;
+  z-index: 2;
+}
+
+.login-loading-text {
+  font-weight: 600;
+  color: #374151;
 }
 
 .login-card h1 {
@@ -101,8 +118,7 @@
 @media (max-width: 768px) {
   .login-container {
     padding: 1rem;
-    align-items: flex-start;
-    padding-top: 8vh;
+    align-items: center;
   }
 
   .login-card {

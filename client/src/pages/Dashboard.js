@@ -110,6 +110,15 @@ const Dashboard = () => {
     }
   }, [branchFilter, dateFrom, dateTo, user?.role, isSupabaseMode]);
 
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
   // Redirect night_manager away from dashboard
   if (user?.role === 'night_manager') {
     return <Navigate to={branchPath('sales')} replace />;
@@ -124,8 +133,14 @@ const Dashboard = () => {
       setError('');
       if (isSupabaseMode) {
         let query = supabase.from('sales_records').select('*');
-        if (user?.role === 'admin' && branchFilter) {
-          query = query.eq('branch_id', parseInt(branchFilter, 10));
+        if (user?.role === 'admin') {
+          if (branchFilter) {
+            query = query.eq('branch_id', parseInt(branchFilter, 10));
+          }
+        } else if (user?.branch_id) {
+          query = query.eq('branch_id', user.branch_id);
+        } else {
+          query = query.eq('id', -1);
         }
         if (dateFrom) {
           query = query.gte('date', dateFrom);

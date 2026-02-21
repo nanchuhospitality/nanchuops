@@ -30,6 +30,11 @@ const Login = () => {
   return (
     <div className="login-container">
       <div className="login-card">
+        {loading && (
+          <div className="login-loading-overlay">
+            <div className="login-loading-text">Signing in...</div>
+          </div>
+        )}
         <h1>Nanchu Hospitality – Operations</h1>
         <h2>Sign In</h2>
         <form onSubmit={handleSubmit}>
@@ -59,9 +64,6 @@ const Login = () => {
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
-        <div className="login-info">
-          <p>Default admin: username: <strong>admin</strong>, password: <strong>admin123</strong></p>
-        </div>
       </div>
     </div>
   );
