@@ -110,14 +110,15 @@ const SalesEntry = () => {
   const fetchBranches = useCallback(async () => {
     try {
       const response = await axios.get('/api/branches');
-      setBranches(response.data.branches || []);
+      const branchRows = Array.isArray(response?.data?.branches) ? response.data.branches : [];
+      setBranches(branchRows);
       setFormData((prev) => {
         if (currentUser?.role !== 'admin' && currentUser?.branch_id) {
           return { ...prev, branch_id: String(currentUser.branch_id) };
         }
         if (prev.branch_id) return prev;
-        if (response.data.branches?.length > 0) {
-          return { ...prev, branch_id: String(response.data.branches[0].id) };
+        if (branchRows.length > 0) {
+          return { ...prev, branch_id: String(branchRows[0].id) };
         }
         return prev;
       });
@@ -129,22 +130,26 @@ const SalesEntry = () => {
   const fetchTransportationRecipients = useCallback(async () => {
     try {
       const response = await axios.get('/api/employees/transportation/recipients');
-      setTransportationRecipients(response.data.employees);
+      const employees = Array.isArray(response?.data?.employees) ? response.data.employees : [];
+      setTransportationRecipients(employees);
     } catch (err) {
       console.error('Failed to load transportation recipients:', err);
+      setTransportationRecipients([]);
     }
   }, []);
 
   const fetchRiders = useCallback(async () => {
     try {
       const response = await axios.get('/api/employees');
+      const employees = Array.isArray(response?.data?.employees) ? response.data.employees : [];
       // Filter employees with rider position
-      const riderEmployees = response.data.employees.filter(emp => 
+      const riderEmployees = employees.filter(emp => 
         emp.post && emp.post.toLowerCase() === 'rider'
       );
       setRiders(riderEmployees);
     } catch (err) {
       console.error('Failed to load riders:', err);
+      setRiders([]);
     }
   }, []);
 
@@ -684,7 +689,7 @@ const SalesEntry = () => {
                             className="transportation-input"
                           >
                             <option value="">Select employee</option>
-                            {transportationRecipients.map((emp) => (
+                            {(Array.isArray(transportationRecipients) ? transportationRecipients : []).map((emp) => (
                               <option key={emp.id} value={emp.id}>
                                 {emp.name}
                               </option>

@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const { getDb } = require('../database/init');
 const { authenticateToken } = require('../middleware/auth');
+const { authenticateSupabaseToken } = require('../middleware/supabaseAuth');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || (() => {
@@ -117,6 +118,151 @@ router.post('/register',
       console.error('Error in register route:', error);
       res.status(500).json({ error: 'Error creating user' });
         }
+  }
+);
+
+// Register user in Supabase auth (admin or branch admin)
+router.post('/supabase/register',
+  authenticateSupabaseToken,
+  [
+    body('username').trim().isLength({ min: 3 }).withMessage('Username must be at least 3 characters'),
+    body('email').isEmail().withMessage('Invalid email'),
+    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+    body('full_name').optional().trim(),
+    body('branch_id').optional({ nullable: true }).isInt().withMessage('Branch ID must be an integer')
+  ],
+  async (req, res) => {
+    let createdAuthUserId = null;
+
+    try {
+      if (!canManageUsers(req.user.role)) {
+        return res.status(403).json({ error: 'Only admin or branch admin can register new users' });
+      }
+
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const SUPABASE_URL = process.env.SUPABASE_URL;
+      const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+        return res.status(500).json({ error: 'Server Supabase admin credentials are not configured' });
+      }
+
+      const db = getDb();
+      const { username, email, password, full_name, role, branch_id } = req.body;
+      const normalizedRole = normalizeRoleInput(role);
+      let effectiveRole = normalizedRole || 'employee';
+      let effectiveBranchId = (branch_id === undefined || branch_id === '' || branch_id === null)
+        ? null
+        : parseInt(branch_id, 10);
+
+      if (req.user.role === 'branch_admin') {
+        if (!req.user.branch_id) {
+          return res.status(400).json({ error: 'Branch admin must belong to a branch' });
+        }
+
+        if (!BRANCH_ADMIN_ALLOWED_ROLES.includes(effectiveRole)) {
+          return res.status(403).json({ error: 'Branch admin can only create employee or night manager users' });
+        }
+
+        effectiveBranchId = req.user.branch_id;
+      }
+
+      const existingUser = await db.query(
+        'SELECT id FROM users WHERE username = $1 OR email = $2',
+        [username, email]
+      );
+      if (existingUser.rows.length > 0) {
+        return res.status(400).json({ error: 'Username or email already exists' });
+      }
+
+      if (effectiveBranchId !== null) {
+        const branchCheck = await db.query('SELECT id FROM branches WHERE id = $1 AND is_active = true', [effectiveBranchId]);
+        if (branchCheck.rows.length === 0) {
+          return res.status(400).json({ error: 'Selected branch not found or inactive' });
+        }
+      }
+
+      const createAuthResponse = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          apikey: SUPABASE_SERVICE_ROLE_KEY
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          email_confirm: true
+        })
+      });
+
+      const createAuthBody = await createAuthResponse.json();
+      if (!createAuthResponse.ok) {
+        return res.status(400).json({ error: createAuthBody?.msg || createAuthBody?.error_description || createAuthBody?.error || 'Failed to create Supabase auth user' });
+      }
+
+      createdAuthUserId = createAuthBody?.user?.id;
+      if (!createdAuthUserId) {
+        return res.status(500).json({ error: 'Supabase auth user created without id' });
+      }
+
+      const receivesTransportation = req.body.receives_transportation ? 1 : 0;
+      const updateResult = await db.query(
+        `UPDATE users
+         SET username = $1,
+             email = $2,
+             full_name = $3,
+             role = $4,
+             branch_id = $5,
+             receives_transportation = $6
+         WHERE auth_user_id = $7
+         RETURNING id, username, email, full_name, role, branch_id, created_at`,
+        [username, email, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation, createdAuthUserId]
+      );
+
+      if (updateResult.rows.length === 0) {
+        const insertResult = await db.query(
+          `INSERT INTO users (auth_user_id, username, email, full_name, role, branch_id, receives_transportation)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id, username, email, full_name, role, branch_id, created_at`,
+          [createdAuthUserId, username, email, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation]
+        );
+        return res.status(201).json({
+          message: 'User created successfully',
+          user: {
+            ...insertResult.rows[0],
+            role: normalizeRoleOutput(insertResult.rows[0].role)
+          }
+        });
+      }
+
+      return res.status(201).json({
+        message: 'User created successfully',
+        user: {
+          ...updateResult.rows[0],
+          role: normalizeRoleOutput(updateResult.rows[0].role)
+        }
+      });
+    } catch (error) {
+      if (createdAuthUserId) {
+        try {
+          await fetch(`${process.env.SUPABASE_URL}/auth/v1/admin/users/${createdAuthUserId}`, {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+              apikey: process.env.SUPABASE_SERVICE_ROLE_KEY
+            }
+          });
+        } catch (cleanupError) {
+          console.error('Failed to cleanup auth user after profile create error:', cleanupError);
+        }
+      }
+      console.error('Error in supabase register route:', error);
+      return res.status(500).json({ error: 'Error creating user' });
+    }
   }
 );
 

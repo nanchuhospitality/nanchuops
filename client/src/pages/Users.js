@@ -125,10 +125,6 @@ const Users = () => {
         }
         setEditingUserId(null);
       } else {
-        if (isSupabaseMode) {
-          throw new Error('Create user is disabled in Supabase mode. Create Auth user first, then assign role here.');
-        }
-        // Create new user
         const createData = {
           ...formData,
           role: (formData.role === 'night_manager' || formData.role === 'nightmanager')
@@ -136,7 +132,21 @@ const Users = () => {
             : formData.role,
           branch_id: formData.branch_id ? parseInt(formData.branch_id, 10) : null
         };
-        await axios.post('/api/auth/register', createData);
+        if (isSupabaseMode) {
+          const { data, error } = await supabase.auth.getSession();
+          if (error) throw error;
+          const accessToken = data?.session?.access_token;
+          if (!accessToken) {
+            throw new Error('Session expired. Please log in again.');
+          }
+          await axios.post('/api/auth/supabase/register', createData, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`
+            }
+          });
+        } else {
+          await axios.post('/api/auth/register', createData);
+        }
       }
       setFormData({
         username: '',
@@ -223,8 +233,7 @@ const Users = () => {
         <button
           onClick={() => setShowForm(!showForm)}
           className="btn-new"
-          disabled={isSupabaseMode}
-          title={isSupabaseMode ? 'Create users in Supabase Authentication first' : 'Add New User'}
+          title="Add New User"
         >
           + Add New User
         </button>
@@ -233,7 +242,7 @@ const Users = () => {
       {error && <div className="error-message">{error}</div>}
       {isSupabaseMode && (
         <div className="error-message" style={{ background: '#eef7ff', color: '#1f4d7a', borderColor: '#d6e8f8' }}>
-          In Supabase mode, new users must be created in Supabase Authentication first, then edited here for role/branch.
+          Supabase mode is active. New users are created through a secure backend endpoint and synced to profiles automatically.
         </div>
       )}
 
@@ -251,7 +260,7 @@ const Users = () => {
                   name="username"
                   value={formData.username}
                   onChange={handleChange}
-                  disabled={isSupabaseMode}
+                  disabled={isSupabaseMode && Boolean(editingUserId)}
                   required
                 />
               </div>
@@ -263,12 +272,12 @@ const Users = () => {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  disabled={isSupabaseMode}
+                  disabled={isSupabaseMode && Boolean(editingUserId)}
                   required
                 />
               </div>
             </div>
-            {!isSupabaseMode && (
+            {(!isSupabaseMode || !editingUserId) && (
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="password">Password {editingUserId ? '' : '*'}</label>

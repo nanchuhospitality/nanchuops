@@ -14,7 +14,12 @@ PORT=3001
 JWT_SECRET=your-strong-random-secret-key-here
 DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DB_NAME
 ALLOWED_ORIGINS=https://yourdomain.com
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
 ```
+
+`SUPABASE_*` variables are required only if you want to create Supabase users from the app UI via the backend.
 
 Generate JWT secret:
 
