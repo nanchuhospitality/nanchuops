@@ -47,21 +47,38 @@ const Users = () => {
     }
   }, [canManageUsers, currentUser?.role, currentUser?.branch_id, isBranchAdmin, isSupabaseMode]);
 
+  useEffect(() => {
+    if (!isSupabaseMode || !canManageUsers) return undefined;
+
+    const channel = supabase
+      .channel('users-management-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'users' },
+        () => {
+          fetchUsers();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isSupabaseMode, canManageUsers]);
+
   const fetchUsers = async () => {
     try {
       if (isSupabaseMode) {
-        const { data, error } = await supabase
-          .from('users')
-          .select('id, auth_user_id, username, email, full_name, role, receives_transportation, created_at, branch_id, branches(name)')
-          .order('created_at', { ascending: false });
-        if (error) throw error;
-        const mapped = (data || [])
-          .filter((u) => Boolean(u.auth_user_id))
-          .map((u) => ({
-          ...u,
-          branch_name: u.branches?.name || null
-          }));
-        setUsers(mapped);
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        const accessToken = sessionData?.session?.access_token;
+        if (!accessToken) throw new Error('Session expired. Please log in again.');
+
+        const response = await axios.get('/api/auth/supabase/users', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: requestTimeoutMs
+        });
+        setUsers(response.data.users || []);
       } else {
         const response = await axios.get('/api/auth/users');
         setUsers(response.data.users);
@@ -150,7 +167,8 @@ const Users = () => {
         branch_id: ''
       });
       setShowForm(false);
-      fetchUsers();
+      await fetchUsers();
+      setCurrentPage(1);
     } catch (err) {
       if (err.code === 'ECONNABORTED') {
         setFormError('Request timed out. Please check backend connection and try again.');
@@ -189,7 +207,7 @@ const Users = () => {
       } else {
         await axios.delete(`/api/auth/users/${userId}`);
       }
-      fetchUsers();
+      await fetchUsers();
     } catch (err) {
       alert(err.response?.data?.error || err.message || 'Failed to delete user');
     }

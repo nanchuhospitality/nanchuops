@@ -550,6 +550,77 @@ router.get('/users', authenticateToken, async (req, res) => {
     }
 });
 
+// Get all users in Supabase mode (admin or branch admin via Supabase token)
+router.get('/supabase/users', authenticateSupabaseToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'branch_admin') {
+      return res.status(403).json({ error: 'Admin or branch admin access required' });
+    }
+
+    if (req.user.role === 'branch_admin' && !req.user.branch_id) {
+      return res.status(400).json({ error: 'Branch admin must belong to a branch' });
+    }
+
+    const supabaseUrl = getSupabaseUrl();
+    const supabaseServiceRoleKey = getSupabaseServiceRoleKey();
+
+    if (!supabaseUrl || !supabaseServiceRoleKey) {
+      return res.status(500).json({ error: 'Supabase admin credentials are not configured' });
+    }
+
+    const usersUrl = new URL(`${supabaseUrl}/rest/v1/users`);
+    usersUrl.searchParams.set('select', 'id,username,email,full_name,role,receives_transportation,created_at,branch_id');
+    usersUrl.searchParams.set('order', 'created_at.desc');
+    if (req.user.role === 'branch_admin') {
+      usersUrl.searchParams.set('branch_id', `eq.${req.user.branch_id}`);
+      usersUrl.searchParams.set('role', 'neq.admin');
+    }
+
+    const usersResp = await fetch(usersUrl.toString(), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        apikey: supabaseServiceRoleKey,
+        Accept: 'application/json'
+      }
+    });
+    if (!usersResp.ok) {
+      const errText = await usersResp.text();
+      return res.status(500).json({ error: `Failed to fetch users from Supabase: ${errText}` });
+    }
+
+    const userRows = await usersResp.json();
+
+    const branchesUrl = new URL(`${supabaseUrl}/rest/v1/branches`);
+    branchesUrl.searchParams.set('select', 'id,name');
+    const branchesResp = await fetch(branchesUrl.toString(), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        apikey: supabaseServiceRoleKey,
+        Accept: 'application/json'
+      }
+    });
+
+    let branchNameById = new Map();
+    if (branchesResp.ok) {
+      const branchRows = await branchesResp.json();
+      branchNameById = new Map((branchRows || []).map((b) => [String(b.id), b.name]));
+    }
+
+    const users = (userRows || []).map((u) => ({
+      ...u,
+      role: normalizeRoleOutput(u.role),
+      branch_name: u.branch_id ? branchNameById.get(String(u.branch_id)) || null : null
+    }));
+
+    return res.json({ users });
+  } catch (error) {
+    console.error('Error in GET /supabase/users route:', error);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // Update user transportation status (admin only)
 router.put('/users/:id/transportation', authenticateToken, async (req, res) => {
   try {
