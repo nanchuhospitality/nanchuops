@@ -34,6 +34,9 @@ const normalizeRoleInput = (role) => {
 };
 
 const normalizeRoleOutput = (role) => (role === 'rider_incharge' ? 'night_manager' : role);
+const getSupabaseUrl = () => process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL || '';
+const getSupabaseServiceRoleKey = () =>
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || '';
 
 // Register new user (admin or branch admin)
 router.post('/register',
@@ -144,10 +147,15 @@ router.post('/supabase/register',
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const SUPABASE_URL = process.env.SUPABASE_URL;
-      const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-        return res.status(500).json({ error: 'Server Supabase admin credentials are not configured' });
+      const supabaseUrl = getSupabaseUrl();
+      const supabaseServiceRoleKey = getSupabaseServiceRoleKey();
+      const missing = [];
+      if (!supabaseUrl) missing.push('SUPABASE_URL');
+      if (!supabaseServiceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+      if (missing.length > 0) {
+        return res.status(500).json({
+          error: `Server Supabase admin credentials are not configured (missing: ${missing.join(', ')})`
+        });
       }
 
       const db = getDb();
@@ -185,12 +193,12 @@ router.post('/supabase/register',
         }
       }
 
-      const createAuthResponse = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+      const createAuthResponse = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          apikey: SUPABASE_SERVICE_ROLE_KEY
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          apikey: supabaseServiceRoleKey
         },
         body: JSON.stringify({
           email,
@@ -204,56 +212,155 @@ router.post('/supabase/register',
         return res.status(400).json({ error: createAuthBody?.msg || createAuthBody?.error_description || createAuthBody?.error || 'Failed to create Supabase auth user' });
       }
 
-      createdAuthUserId = createAuthBody?.user?.id;
+      createdAuthUserId =
+        createAuthBody?.user?.id ||
+        createAuthBody?.id ||
+        createAuthBody?.data?.user?.id ||
+        null;
+
       if (!createdAuthUserId) {
-        return res.status(500).json({ error: 'Supabase auth user created without id' });
+        try {
+          const profileUrl = new URL(`${supabaseUrl}/rest/v1/users`);
+          profileUrl.searchParams.set('select', 'id,auth_user_id,email,created_at');
+          profileUrl.searchParams.set('email', `eq.${email}`);
+          profileUrl.searchParams.set('order', 'created_at.desc');
+          profileUrl.searchParams.set('limit', '1');
+
+          const profileLookupResponse = await fetch(profileUrl.toString(), {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${supabaseServiceRoleKey}`,
+              apikey: supabaseServiceRoleKey,
+              Accept: 'application/json'
+            }
+          });
+
+          if (profileLookupResponse.ok) {
+            const rows = await profileLookupResponse.json();
+            if (Array.isArray(rows) && rows.length > 0 && rows[0]?.auth_user_id) {
+              createdAuthUserId = rows[0].auth_user_id;
+            }
+          }
+        } catch (profileLookupError) {
+          console.error('Profile lookup after auth create failed:', profileLookupError);
+        }
+      }
+
+      if (!createdAuthUserId) {
+        return res.status(500).json({
+          error: 'Supabase auth user created but id was not returned',
+          details: createAuthBody
+        });
       }
 
       const receivesTransportation = req.body.receives_transportation ? 1 : 0;
-      const updateResult = await db.query(
-        `UPDATE users
-         SET username = $1,
-             email = $2,
-             full_name = $3,
-             role = $4,
-             branch_id = $5,
-             receives_transportation = $6
-         WHERE auth_user_id = $7
-         RETURNING id, username, email, full_name, role, branch_id, created_at`,
-        [username, email, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation, createdAuthUserId]
+      const hashedPassword = bcrypt.hashSync(password, 10);
+      const schemaColsResult = await db.query(
+        `SELECT column_name, is_nullable
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'users'`
       );
+      const schemaCols = new Map(
+        (schemaColsResult.rows || []).map((r) => [String(r.column_name), String(r.is_nullable).toUpperCase()])
+      );
+      const hasAuthUserIdColumn = schemaCols.has('auth_user_id');
+      const hasPasswordColumn = schemaCols.has('password');
+      const isPasswordNullable = schemaCols.get('password') === 'YES';
 
-      if (updateResult.rows.length === 0) {
-        const insertResult = await db.query(
-          `INSERT INTO users (auth_user_id, username, email, full_name, role, branch_id, receives_transportation)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+      let persistedUser = null;
+
+      if (hasAuthUserIdColumn) {
+        const updateResult = await db.query(
+          `UPDATE users
+           SET username = $1,
+               email = $2,
+               full_name = $3,
+               role = $4,
+               branch_id = $5,
+               receives_transportation = $6
+           WHERE auth_user_id = $7
            RETURNING id, username, email, full_name, role, branch_id, created_at`,
-          [createdAuthUserId, username, email, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation]
+          [username, email, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation, createdAuthUserId]
         );
-        return res.status(201).json({
-          message: 'User created successfully',
-          user: {
-            ...insertResult.rows[0],
-            role: normalizeRoleOutput(insertResult.rows[0].role)
-          }
-        });
+        if (updateResult.rows.length > 0) {
+          persistedUser = updateResult.rows[0];
+        } else if (hasPasswordColumn) {
+          const insertResult = await db.query(
+            `INSERT INTO users (auth_user_id, username, email, password, full_name, role, branch_id, receives_transportation)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id, username, email, full_name, role, branch_id, created_at`,
+            [
+              createdAuthUserId,
+              username,
+              email,
+              isPasswordNullable ? null : hashedPassword,
+              full_name || null,
+              effectiveRole,
+              effectiveBranchId,
+              receivesTransportation
+            ]
+          );
+          persistedUser = insertResult.rows[0];
+        } else {
+          const insertResult = await db.query(
+            `INSERT INTO users (auth_user_id, username, email, full_name, role, branch_id, receives_transportation)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, username, email, full_name, role, branch_id, created_at`,
+            [createdAuthUserId, username, email, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation]
+          );
+          persistedUser = insertResult.rows[0];
+        }
+      } else {
+        const updateLegacyResult = await db.query(
+          `UPDATE users
+           SET username = $1,
+               full_name = $2,
+               role = $3,
+               branch_id = $4,
+               receives_transportation = $5
+           WHERE lower(email) = lower($6)
+           RETURNING id, username, email, full_name, role, branch_id, created_at`,
+          [username, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation, email]
+        );
+
+        if (updateLegacyResult.rows.length > 0) {
+          persistedUser = updateLegacyResult.rows[0];
+        } else if (hasPasswordColumn) {
+          const insertLegacyResult = await db.query(
+            `INSERT INTO users (username, email, password, full_name, role, branch_id, receives_transportation)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, username, email, full_name, role, branch_id, created_at`,
+            [username, email, hashedPassword, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation]
+          );
+          persistedUser = insertLegacyResult.rows[0];
+        } else {
+          const insertLegacyResult = await db.query(
+            `INSERT INTO users (username, email, full_name, role, branch_id, receives_transportation)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, username, email, full_name, role, branch_id, created_at`,
+            [username, email, full_name || null, effectiveRole, effectiveBranchId, receivesTransportation]
+          );
+          persistedUser = insertLegacyResult.rows[0];
+        }
       }
 
       return res.status(201).json({
         message: 'User created successfully',
         user: {
-          ...updateResult.rows[0],
-          role: normalizeRoleOutput(updateResult.rows[0].role)
+          ...persistedUser,
+          role: normalizeRoleOutput(persistedUser.role)
         }
       });
     } catch (error) {
       if (createdAuthUserId) {
         try {
-          await fetch(`${process.env.SUPABASE_URL}/auth/v1/admin/users/${createdAuthUserId}`, {
+          const supabaseCleanupUrl = getSupabaseUrl();
+          const supabaseCleanupKey = getSupabaseServiceRoleKey();
+          await fetch(`${supabaseCleanupUrl}/auth/v1/admin/users/${createdAuthUserId}`, {
             method: 'DELETE',
             headers: {
-              Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-              apikey: process.env.SUPABASE_SERVICE_ROLE_KEY
+              Authorization: `Bearer ${supabaseCleanupKey}`,
+              apikey: supabaseCleanupKey
             }
           });
         } catch (cleanupError) {

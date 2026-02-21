@@ -30,6 +30,7 @@ const Users = () => {
   const [submitting, setSubmitting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const requestTimeoutMs = 15000;
 
   useEffect(() => {
     if (canManageUsers) {
@@ -51,13 +52,15 @@ const Users = () => {
       if (isSupabaseMode) {
         const { data, error } = await supabase
           .from('users')
-          .select('id, username, email, full_name, role, receives_transportation, created_at, branch_id, branches(name)')
+          .select('id, auth_user_id, username, email, full_name, role, receives_transportation, created_at, branch_id, branches(name)')
           .order('created_at', { ascending: false });
         if (error) throw error;
-        const mapped = (data || []).map((u) => ({
+        const mapped = (data || [])
+          .filter((u) => Boolean(u.auth_user_id))
+          .map((u) => ({
           ...u,
           branch_name: u.branches?.name || null
-        }));
+          }));
         setUsers(mapped);
       } else {
         const response = await axios.get('/api/auth/users');
@@ -121,10 +124,13 @@ const Users = () => {
             delete updateData.password;
           }
           delete updateData.receives_transportation;
-          await axios.put(`/api/auth/users/${editingUserId}`, updateData);
+          await axios.put(`/api/auth/users/${editingUserId}`, updateData, { timeout: requestTimeoutMs });
         }
         setEditingUserId(null);
       } else {
+        if (isSupabaseMode) {
+          throw new Error('Create user is disabled in Supabase mode. Create Auth user first, then assign role/branch here.');
+        }
         const createData = {
           ...formData,
           role: (formData.role === 'night_manager' || formData.role === 'nightmanager')
@@ -132,21 +138,7 @@ const Users = () => {
             : formData.role,
           branch_id: formData.branch_id ? parseInt(formData.branch_id, 10) : null
         };
-        if (isSupabaseMode) {
-          const { data, error } = await supabase.auth.getSession();
-          if (error) throw error;
-          const accessToken = data?.session?.access_token;
-          if (!accessToken) {
-            throw new Error('Session expired. Please log in again.');
-          }
-          await axios.post('/api/auth/supabase/register', createData, {
-            headers: {
-              Authorization: `Bearer ${accessToken}`
-            }
-          });
-        } else {
-          await axios.post('/api/auth/register', createData);
-        }
+        await axios.post('/api/auth/register', createData, { timeout: requestTimeoutMs });
       }
       setFormData({
         username: '',
@@ -160,6 +152,10 @@ const Users = () => {
       setShowForm(false);
       fetchUsers();
     } catch (err) {
+      if (err.code === 'ECONNABORTED') {
+        setFormError('Request timed out. Please check backend connection and try again.');
+        return;
+      }
       setFormError(err.response?.data?.error || err.message || (editingUserId ? 'Failed to update user' : 'Failed to create user'));
     } finally {
       setSubmitting(false);
@@ -233,7 +229,8 @@ const Users = () => {
         <button
           onClick={() => setShowForm(!showForm)}
           className="btn-new"
-          title="Add New User"
+          disabled={isSupabaseMode}
+          title={isSupabaseMode ? 'Create users in Supabase Authentication first' : 'Add New User'}
         >
           + Add New User
         </button>
@@ -254,7 +251,7 @@ const Users = () => {
                   name="username"
                   value={formData.username}
                   onChange={handleChange}
-                  disabled={isSupabaseMode && Boolean(editingUserId)}
+                  disabled={isSupabaseMode}
                   required
                 />
               </div>
@@ -266,12 +263,12 @@ const Users = () => {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  disabled={isSupabaseMode && Boolean(editingUserId)}
+                  disabled={isSupabaseMode}
                   required
                 />
               </div>
             </div>
-            {(!isSupabaseMode || !editingUserId) && (
+            {!isSupabaseMode && (
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="password">Password {editingUserId ? '' : '*'}</label>
