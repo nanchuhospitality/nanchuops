@@ -31,6 +31,7 @@ const Users = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const requestTimeoutMs = 15000;
+  const apiBaseUrl = process.env.REACT_APP_API_URL;
 
   useEffect(() => {
     if (canManageUsers) {
@@ -75,11 +76,28 @@ const Users = () => {
         if (!accessToken) throw new Error('Session expired. Please log in again.');
 
         try {
-          const response = await axios.get('/api/auth/supabase/users', {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            timeout: requestTimeoutMs
-          });
-          setUsers(response.data.users || []);
+          const backendCandidates = [
+            '/api/auth/supabase/users',
+            apiBaseUrl ? `${apiBaseUrl.replace(/\/$/, '')}/api/auth/supabase/users` : null
+          ].filter(Boolean);
+
+          let backendUsers = null;
+          let backendError = null;
+          for (const endpoint of backendCandidates) {
+            try {
+              const response = await axios.get(endpoint, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                timeout: requestTimeoutMs
+              });
+              backendUsers = response.data.users || [];
+              break;
+            } catch (endpointError) {
+              backendError = endpointError;
+            }
+          }
+
+          if (!backendUsers) throw backendError || new Error('Backend users endpoint unavailable');
+          setUsers(backendUsers);
         } catch (apiError) {
           // Fallback for deployments where backend /api is unavailable.
           const { data, error } = await supabase
@@ -93,6 +111,9 @@ const Users = () => {
             branch_name: u.branches?.name || null
           }));
           setUsers(mapped);
+          if ((mapped || []).length === 0 && (currentUser?.role === 'admin' || currentUser?.role === 'branch_admin')) {
+            setError('No users returned. Check REACT_APP_API_URL/backend mapping for /api/auth/supabase/users.');
+          }
         }
       } else {
         const response = await axios.get('/api/auth/users');
