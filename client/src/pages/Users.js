@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { formatDateToNepali } from '../utils/dateFormatter';
@@ -32,7 +32,7 @@ const Users = () => {
   const itemsPerPage = 10;
   const requestTimeoutMs = 15000;
   const apiBaseUrl = process.env.REACT_APP_API_URL;
-  const withTimeout = async (promise, ms = 8000, message = 'Request timed out') => {
+  const withTimeout = useCallback(async (promise, ms = 8000, message = 'Request timed out') => {
     let timer;
     try {
       return await Promise.race([
@@ -44,63 +44,13 @@ const Users = () => {
     } finally {
       if (timer) clearTimeout(timer);
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    if (canManageUsers) {
-      fetchUsers();
-    }
-    if (currentUser?.role === 'admin') {
-      fetchBranches();
-    }
-    if (isBranchAdmin && currentUser?.branch_id) {
-      setFormData((prev) => ({
-        ...prev,
-        branch_id: String(currentUser.branch_id)
-      }));
-    }
-  }, [canManageUsers, currentUser?.role, currentUser?.branch_id, isBranchAdmin, isSupabaseMode]);
-
-  useEffect(() => {
-    if (!isSupabaseMode || !canManageUsers) return undefined;
-
-    const channel = supabase
-      .channel('users-management-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'users' },
-        () => {
-          fetchUsers(true);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [isSupabaseMode, canManageUsers]);
-
-  useEffect(() => {
-    if (canManageUsers) return;
-    setLoading(false);
-    setError('You do not have permission to view users.');
-  }, [canManageUsers]);
-
-  useEffect(() => {
-    if (!loading) return undefined;
-    const timer = setTimeout(() => {
-      setLoading(false);
-      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
-    }, 10000);
-    return () => clearTimeout(timer);
-  }, [loading]);
-
-  const fetchUsers = async (silent = false) => {
+  const fetchUsers = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
       setError('');
       if (isSupabaseMode) {
-        // Prefer direct Supabase query first to avoid slow backend fallback delays.
         try {
           let query = supabase
             .from('users')
@@ -108,6 +58,7 @@ const Users = () => {
             .order('created_at', { ascending: false });
           if (isBranchAdmin && currentUser?.branch_id) {
             query = query.eq('branch_id', currentUser.branch_id);
+            query = query.neq('role', 'admin');
           }
           const { data, error } = await withTimeout(
             query,
@@ -126,7 +77,6 @@ const Users = () => {
           }
           return;
         } catch (supabaseError) {
-          // Fallback to backend endpoint when direct query fails.
           const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
           if (sessionError) throw supabaseError;
           const accessToken = sessionData?.session?.access_token;
@@ -162,9 +112,9 @@ const Users = () => {
     } finally {
       if (!silent) setLoading(false);
     }
-  };
+  }, [apiBaseUrl, canManageUsers, currentUser?.branch_id, isBranchAdmin, isSupabaseMode, withTimeout]);
 
-  const fetchBranches = async () => {
+  const fetchBranches = useCallback(async () => {
     try {
       if (isSupabaseMode) {
         const { data, error } = await supabase
@@ -181,7 +131,57 @@ const Users = () => {
     } catch (err) {
       console.error('Failed to load branches', err);
     }
-  };
+  }, [isSupabaseMode]);
+
+  useEffect(() => {
+    if (canManageUsers) {
+      fetchUsers();
+    }
+    if (currentUser?.role === 'admin') {
+      fetchBranches();
+    }
+    if (isBranchAdmin && currentUser?.branch_id) {
+      setFormData((prev) => ({
+        ...prev,
+        branch_id: String(currentUser.branch_id)
+      }));
+    }
+  }, [canManageUsers, currentUser?.role, currentUser?.branch_id, fetchBranches, fetchUsers, isBranchAdmin]);
+
+  useEffect(() => {
+    if (!isSupabaseMode || !canManageUsers) return undefined;
+
+    const channel = supabase
+      .channel('users-management-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'users' },
+        () => {
+          fetchUsers(true);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isSupabaseMode, canManageUsers, fetchUsers]);
+
+  useEffect(() => {
+    if (canManageUsers) return;
+    setLoading(false);
+    setError('You do not have permission to view users.');
+  }, [canManageUsers]);
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
 
   const handleChange = (e) => {
     setFormData({

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { formatDateToNepali } from '../utils/dateFormatter';
@@ -13,6 +13,17 @@ const normalizePositionForForm = (value, availablePositions = []) => {
   if (exact) return exact.name;
   const ci = availablePositions.find((p) => p.name?.toLowerCase() === raw.toLowerCase());
   return ci ? ci.name : raw;
+};
+
+const formatPositionForDisplay = (value) => {
+  const labels = String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (labels.length === 0) return '-';
+  return Array.from(new Set(labels.map((item) => item.toLowerCase())))
+    .map((lower) => labels.find((item) => item.toLowerCase() === lower))
+    .join(', ');
 };
 
 const Employees = () => {
@@ -74,18 +85,6 @@ const Employees = () => {
   };
 
   useEffect(() => {
-    fetchPositions();
-    if (user?.role === 'admin') {
-      fetchBranches();
-    }
-  }, [user?.role, isSupabaseMode]);
-
-  useEffect(() => {
-    fetchEmployees();
-    setCurrentPage(1);
-  }, [currentTab, isSupabaseMode]);
-
-  useEffect(() => {
     if (user?.role === 'night_manager') {
       setFormData((prev) => ({ ...prev, post: 'Rider' }));
     }
@@ -109,7 +108,7 @@ const Employees = () => {
     return () => clearTimeout(timer);
   }, [submitting]);
 
-  const fetchPositions = async () => {
+  const fetchPositions = useCallback(async () => {
     try {
       if (isSupabaseMode) {
         const { data, error } = await supabase
@@ -125,9 +124,9 @@ const Employees = () => {
     } catch (err) {
       console.error('Failed to load positions:', err);
     }
-  };
+  }, [isSupabaseMode]);
 
-  const fetchEmployees = async () => {
+  const fetchEmployees = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -157,9 +156,9 @@ const Employees = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentTab, isSupabaseMode]);
 
-  const fetchBranches = async () => {
+  const fetchBranches = useCallback(async () => {
     try {
       if (isSupabaseMode) {
         const { data, error } = await supabase
@@ -176,7 +175,19 @@ const Employees = () => {
     } catch (err) {
       console.error('Failed to load branches:', err);
     }
-  };
+  }, [isSupabaseMode]);
+
+  useEffect(() => {
+    fetchPositions();
+    if (user?.role === 'admin') {
+      fetchBranches();
+    }
+  }, [fetchBranches, fetchPositions, user?.role]);
+
+  useEffect(() => {
+    fetchEmployees();
+    setCurrentPage(1);
+  }, [fetchEmployees]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -975,7 +986,7 @@ const Employees = () => {
                         : '-'
                       }
                     </td>
-                    <td className="col-post">{employee.post || '-'}</td>
+                    <td className="col-post">{formatPositionForDisplay(employee.post)}</td>
                     <td className="col-branch">{employee.branch_name || employee.branch_id || '-'}</td>
                     {(user?.role === 'admin' || user?.role === 'branch_admin' || user?.role === 'night_manager') && (
                       <td className="col-actions">

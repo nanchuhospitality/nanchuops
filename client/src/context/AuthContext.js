@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 
@@ -14,7 +14,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authProvider, setAuthProvider] = useState(isSupabaseConfigured ? 'supabase' : 'legacy');
-  const withTimeout = async (promise, ms = 15000, message = 'Request timed out') => {
+  const withTimeout = useCallback(async (promise, ms = 15000, message = 'Request timed out') => {
     let timer;
     try {
       return await Promise.race([
@@ -26,9 +26,9 @@ export const AuthProvider = ({ children }) => {
     } finally {
       if (timer) clearTimeout(timer);
     }
-  };
+  }, []);
 
-  const mapProfileToUser = (profile) => ({
+  const mapProfileToUser = useCallback((profile) => ({
     id: profile.id,
     auth_user_id: profile.auth_user_id || null,
     username: profile.username || '',
@@ -38,9 +38,9 @@ export const AuthProvider = ({ children }) => {
     branch_id: profile.branch_id || null,
     branch_name: profile.branches?.name || null,
     branch_code: profile.branches?.code || null
-  });
+  }), []);
 
-  const readCachedProfile = () => {
+  const readCachedProfile = useCallback(() => {
     try {
       const raw = localStorage.getItem(PROFILE_CACHE_KEY);
       if (!raw) return null;
@@ -49,9 +49,9 @@ export const AuthProvider = ({ children }) => {
     } catch (_err) {
       return null;
     }
-  };
+  }, [PROFILE_CACHE_KEY]);
 
-  const writeCachedProfile = (profile) => {
+  const writeCachedProfile = useCallback((profile) => {
     try {
       if (profile) {
         localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
@@ -61,9 +61,9 @@ export const AuthProvider = ({ children }) => {
     } catch (_err) {
       // ignore cache write issues
     }
-  };
+  }, [PROFILE_CACHE_KEY]);
 
-  const fetchSupabaseProfile = async (authUserId) => {
+  const fetchSupabaseProfile = useCallback(async (authUserId) => {
     const { data, error } = await withTimeout(
       supabase
         .from('users')
@@ -77,9 +77,9 @@ export const AuthProvider = ({ children }) => {
     if (error) throw error;
     if (!data) return null;
     return mapProfileToUser(data);
-  };
+  }, [mapProfileToUser, withTimeout]);
 
-  const bootstrapSupabaseAuth = async () => {
+  const bootstrapSupabaseAuth = useCallback(async () => {
     try {
       const { data, error } = await withTimeout(
         supabase.auth.getSession(),
@@ -145,7 +145,19 @@ export const AuthProvider = ({ children }) => {
     });
 
     return () => listener?.subscription?.unsubscribe();
-  };
+  }, [fetchSupabaseProfile, readCachedProfile, withTimeout, writeCachedProfile]);
+
+  const fetchUser = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/auth/me');
+      setUser(response.data.user);
+    } catch (error) {
+      localStorage.removeItem('token');
+      delete axios.defaults.headers.common['Authorization'];
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (isSupabaseConfigured) {
@@ -170,19 +182,7 @@ export const AuthProvider = ({ children }) => {
     } else {
       setLoading(false);
     }
-  }, []);
-
-  const fetchUser = async () => {
-    try {
-      const response = await axios.get('/api/auth/me');
-      setUser(response.data.user);
-    } catch (error) {
-      localStorage.removeItem('token');
-      delete axios.defaults.headers.common['Authorization'];
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [bootstrapSupabaseAuth, fetchUser]);
 
   const login = async (username, password) => {
     if (isSupabaseConfigured) {

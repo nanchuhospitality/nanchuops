@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
@@ -26,19 +26,6 @@ const Branches = () => {
     admin_full_name: ''
   });
 
-  useEffect(() => {
-    fetchBranches();
-  }, [isSupabaseMode, user?.role]);
-
-  useEffect(() => {
-    if (!loading) return undefined;
-    const timer = setTimeout(() => {
-      setLoading(false);
-      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
-    }, 10000);
-    return () => clearTimeout(timer);
-  }, [loading]);
-
   const employeeCountByBranch = useMemo(() => {
     const map = new Map();
     branches.forEach((b) => {
@@ -50,7 +37,7 @@ const Branches = () => {
     return map;
   }, [branches]);
 
-  const fetchBranches = async () => {
+  const fetchBranches = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -98,7 +85,20 @@ const Branches = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [canManageBranches, isSupabaseMode]);
+
+  useEffect(() => {
+    fetchBranches();
+  }, [fetchBranches]);
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   const resetForm = () => {
     setEditingId(null);

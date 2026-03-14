@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useParams } from 'react-router-dom';
 import axios from 'axios';
@@ -24,19 +24,6 @@ const SalesList = () => {
   const branchPath = (path) => `/${branchslug || user?.branch_code || 'main'}/${path}`;
 
   useEffect(() => {
-    fetchRecords();
-    if (user?.role === 'admin') {
-      fetchBranches();
-    }
-  }, [user?.role, isSupabaseMode]);
-
-  useEffect(() => {
-    if (user?.role === 'admin') {
-      fetchRecords();
-    }
-  }, [branchFilter, user?.role, isSupabaseMode]);
-
-  useEffect(() => {
     setCurrentPage(1);
   }, [branchFilter, dateFilter]);
 
@@ -49,7 +36,7 @@ const SalesList = () => {
     return () => clearTimeout(timer);
   }, [loading]);
 
-  const fetchRecords = async () => {
+  const fetchRecords = useCallback(async () => {
     try {
       if (isSupabaseMode) {
         let query = supabase
@@ -87,9 +74,9 @@ const SalesList = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [branchFilter, isSupabaseMode, user?.branch_id, user?.role]);
 
-  const fetchBranches = async () => {
+  const fetchBranches = useCallback(async () => {
     try {
       if (isSupabaseMode) {
         const { data, error: bErr } = await supabase
@@ -106,7 +93,17 @@ const SalesList = () => {
     } catch (err) {
       console.error('Failed to load branches', err);
     }
-  };
+  }, [isSupabaseMode]);
+
+  useEffect(() => {
+    fetchRecords();
+  }, [fetchRecords]);
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      fetchBranches();
+    }
+  }, [fetchBranches, user?.role]);
 
   const formatCurrency = (amount) => {
     const formatted = new Intl.NumberFormat('en-NP', {

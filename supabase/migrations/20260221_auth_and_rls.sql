@@ -37,6 +37,19 @@ as $$
   limit 1;
 $$;
 
+create or replace function public.app_current_user_id()
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select u.id
+  from public.users u
+  where u.auth_user_id = auth.uid()
+  limit 1;
+$$;
+
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -127,6 +140,7 @@ alter table public.users enable row level security;
 alter table public.branches enable row level security;
 alter table public.positions enable row level security;
 alter table public.employees enable row level security;
+alter table public.sales_records enable row level security;
 
 -- USERS policies
 drop policy if exists users_select_own_or_admin on public.users;
@@ -284,6 +298,71 @@ create policy employees_delete_admin_only
 on public.employees
 for delete
 using (public.is_admin());
+
+-- SALES RECORDS policies
+drop policy if exists sales_records_select_by_role on public.sales_records;
+create policy sales_records_select_by_role
+on public.sales_records
+for select
+using (
+  public.is_admin()
+  or (
+    public.is_branch_admin()
+    and branch_id = public.app_current_branch_id()
+  )
+  or (
+    public.is_night_manager()
+    and branch_id = public.app_current_branch_id()
+  )
+  or user_id = public.app_current_user_id()
+);
+
+drop policy if exists sales_records_insert_by_role on public.sales_records;
+create policy sales_records_insert_by_role
+on public.sales_records
+for insert
+with check (
+  public.is_admin()
+  or (
+    user_id = public.app_current_user_id()
+    and branch_id = public.app_current_branch_id()
+  )
+);
+
+drop policy if exists sales_records_update_by_role on public.sales_records;
+create policy sales_records_update_by_role
+on public.sales_records
+for update
+using (
+  public.is_admin()
+  or (
+    public.is_branch_admin()
+    and branch_id = public.app_current_branch_id()
+  )
+  or (
+    public.is_night_manager()
+    and branch_id = public.app_current_branch_id()
+  )
+  or (
+    user_id = public.app_current_user_id()
+    and branch_id = public.app_current_branch_id()
+  )
+)
+with check (
+  public.is_admin()
+  or (
+    public.is_branch_admin()
+    and branch_id = public.app_current_branch_id()
+  )
+  or (
+    public.is_night_manager()
+    and branch_id = public.app_current_branch_id()
+  )
+  or (
+    user_id = public.app_current_user_id()
+    and branch_id = public.app_current_branch_id()
+  )
+);
 
 -- Storage bucket for employee documents
 insert into storage.buckets (id, name, public)

@@ -20,11 +20,14 @@
   display: flex;
   gap: 0.75rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .sales-filters-stack {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
@@ -32,6 +35,7 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .date-filter-input {
@@ -631,6 +635,8 @@
 
   .sales-filters-stack {
     width: 100%;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .date-filter-group {

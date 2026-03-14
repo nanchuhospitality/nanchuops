@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -67,6 +67,19 @@ const getPresetRange = (preset) => {
 };
 
 const DEFAULT_RANGE = getPresetRange('last30');
+const EMPTY_STATS = {
+  totalSales: 0,
+  todaySales: 0,
+  monthSales: 0,
+  totalRecords: 0,
+  dailySales: [],
+  totalQRSales: 0,
+  totalCashSales: 0,
+  totalDeliveryCollected: 0,
+  totalRiderPayment: 0,
+  totalTransportation: 0,
+  transportationByRecipient: []
+};
 
 const Dashboard = () => {
   const { user, authProvider } = useContext(AuthContext);
@@ -83,49 +96,7 @@ const Dashboard = () => {
   const [dateTo, setDateTo] = useState(DEFAULT_RANGE.to);
   const [missingDocumentEmployees, setMissingDocumentEmployees] = useState([]);
   const [showMissingDocsMenu, setShowMissingDocsMenu] = useState(false);
-  const emptyStats = {
-    totalSales: 0,
-    todaySales: 0,
-    monthSales: 0,
-    totalRecords: 0,
-    dailySales: [],
-    totalQRSales: 0,
-    totalCashSales: 0,
-    totalDeliveryCollected: 0,
-    totalRiderPayment: 0,
-    totalTransportation: 0,
-    transportationByRecipient: []
-  };
-
-  useEffect(() => {
-    if (user?.role === 'admin') {
-      fetchBranches();
-      fetchMissingDocuments();
-    }
-    fetchStats();
-  }, [user?.role, isSupabaseMode]);
-
-  useEffect(() => {
-    if (user?.role) {
-      fetchStats();
-    }
-  }, [branchFilter, dateFrom, dateTo, user?.role, isSupabaseMode]);
-
-  useEffect(() => {
-    if (!loading) return undefined;
-    const timer = setTimeout(() => {
-      setLoading(false);
-      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
-    }, 10000);
-    return () => clearTimeout(timer);
-  }, [loading]);
-
-  // Redirect night_manager away from dashboard
-  if (user?.role === 'night_manager') {
-    return <Navigate to={branchPath('sales')} replace />;
-  }
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       if (dateFrom && dateTo && dateFrom > dateTo) {
         setError('Invalid date range: "From" date must be before or equal to "To" date');
@@ -188,7 +159,7 @@ const Dashboard = () => {
             } catch (_) {}
           }
           return acc;
-        }, { ...emptyStats });
+        }, { ...EMPTY_STATS });
         calc.totalRecords = rows.length;
         calc.dailySales = Array.from(dailyMap.entries())
           .map(([date, total]) => ({ date, total }))
@@ -217,9 +188,9 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [branchFilter, dateFrom, dateTo, isSupabaseMode, user?.branch_id, user?.role]);
 
-  const fetchBranches = async () => {
+  const fetchBranches = useCallback(async () => {
     try {
       if (isSupabaseMode) {
         const { data, error: bErr } = await supabase
@@ -236,9 +207,9 @@ const Dashboard = () => {
     } catch (err) {
       console.error('Failed to load branches', err);
     }
-  };
+  }, [isSupabaseMode]);
 
-  const fetchMissingDocuments = async () => {
+  const fetchMissingDocuments = useCallback(async () => {
     try {
       let employees = [];
       if (isSupabaseMode) {
@@ -282,7 +253,31 @@ const Dashboard = () => {
     } catch (err) {
       console.error('Failed to load employee documents status', err);
     }
-  };
+  }, [isSupabaseMode]);
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      fetchBranches();
+      fetchMissingDocuments();
+    }
+    if (user?.role) {
+      fetchStats();
+    }
+  }, [fetchBranches, fetchMissingDocuments, fetchStats, user?.role]);
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
+  // Redirect night_manager away from dashboard
+  if (user?.role === 'night_manager') {
+    return <Navigate to={branchPath('sales')} replace />;
+  }
 
   if (loading) {
     return <div className="dashboard-loading">Loading dashboard...</div>;

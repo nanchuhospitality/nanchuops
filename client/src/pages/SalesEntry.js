@@ -167,7 +167,7 @@ const SalesEntry = () => {
         setFormData((prev) => ({ ...prev, branch_id: String(currentUser.branch_id) }));
       }
     }
-  }, [isSupabaseMode]);
+  }, [currentUser?.branch_id, currentUser?.role, isSupabaseMode]);
 
   const fetchTransportationRecipients = useCallback(async () => {
     try {
@@ -191,7 +191,7 @@ const SalesEntry = () => {
       console.error('Failed to load transportation recipients:', err);
       setTransportationRecipients([]);
     }
-  }, [currentUser?.branch_id, currentUser?.role, isSupabaseMode]);
+  }, [isSupabaseMode]);
 
   const fetchRiders = useCallback(async () => {
     try {
@@ -221,7 +221,7 @@ const SalesEntry = () => {
       console.error('Failed to load riders:', err);
       setRiders([]);
     }
-  }, [currentUser?.branch_id, currentUser?.role, isSupabaseMode]);
+  }, [isSupabaseMode]);
 
   useEffect(() => {
     fetchBranches();

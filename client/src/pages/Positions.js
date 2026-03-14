@@ -1,10 +1,18 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { formatDateToNepali } from '../utils/dateFormatter';
 import Pagination from '../components/Pagination';
 import { supabase } from '../lib/supabaseClient';
 import './Positions.css';
+
+const UNIVERSAL_RIDER_POSITION = 'Rider';
+const isRiderPosition = (name) => String(name || '').trim().toLowerCase().includes('rider');
+const normalizePositionName = (name) => {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return '';
+  return isRiderPosition(trimmed) ? UNIVERSAL_RIDER_POSITION : trimmed;
+};
 
 const Positions = () => {
   const [positions, setPositions] = useState([]);
@@ -23,20 +31,7 @@ const Positions = () => {
   const { user, authProvider } = useContext(AuthContext);
   const isSupabaseMode = authProvider === 'supabase';
 
-  useEffect(() => {
-    fetchPositions();
-  }, [isSupabaseMode]);
-
-  useEffect(() => {
-    if (!loading) return undefined;
-    const timer = setTimeout(() => {
-      setLoading(false);
-      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
-    }, 10000);
-    return () => clearTimeout(timer);
-  }, [loading]);
-
-  const fetchPositions = async () => {
+  const fetchPositions = useCallback(async () => {
     try {
       if (isSupabaseMode) {
         const { data, error } = await supabase
@@ -54,7 +49,20 @@ const Positions = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isSupabaseMode]);
+
+  useEffect(() => {
+    fetchPositions();
+  }, [fetchPositions]);
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError((prev) => prev || 'Loading timed out. Please refresh and try again.');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -70,10 +78,29 @@ const Positions = () => {
     setSubmitting(true);
 
     try {
+      const normalizedName = normalizePositionName(formData.name);
+      const normalizedDescription = formData.description || null;
+
       if (isSupabaseMode) {
+        if (!normalizedName) {
+          throw new Error('Position name is required');
+        }
+
+        const conflictingPosition = positions.find((position) => {
+          if (editingId && position.id === editingId) return false;
+          return normalizePositionName(position.name).toLowerCase() === normalizedName.toLowerCase();
+        });
+        if (conflictingPosition) {
+          throw new Error(
+            isRiderPosition(normalizedName)
+              ? 'Universal Rider position already exists and cannot be duplicated'
+              : 'Position name already exists'
+          );
+        }
+
         const payload = {
-          name: (formData.name || '').trim(),
-          description: formData.description || null
+          name: normalizedName,
+          description: normalizedDescription
         };
         if (editingId) {
           const { error } = await supabase.from('positions').update(payload).eq('id', editingId);
@@ -83,9 +110,15 @@ const Positions = () => {
           if (error) throw error;
         }
       } else if (editingId) {
-        await axios.put(`/api/positions/${editingId}`, formData);
+        await axios.put(`/api/positions/${editingId}`, {
+          ...formData,
+          name: normalizedName
+        });
       } else {
-        await axios.post('/api/positions', formData);
+        await axios.post('/api/positions', {
+          ...formData,
+          name: normalizedName
+        });
       }
       resetForm();
       fetchPositions();
@@ -136,8 +169,6 @@ const Positions = () => {
   const formatDate = (dateString) => {
     return formatDateToNepali(dateString);
   };
-
-  const isRiderPosition = (name) => String(name || '').trim().toLowerCase() === 'rider';
 
   if (loading) {
     return <div className="positions-loading">Loading positions...</div>;

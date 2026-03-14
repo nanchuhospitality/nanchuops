@@ -23,11 +23,34 @@ const parseBooleanFlag = (value, defaultValue = 0) => {
   return defaultValue;
 };
 const UNIVERSAL_RIDER_POSITION = 'Rider';
+const isRiderPost = (value) => String(value || '').trim().toLowerCase().includes('rider');
+
 const normalizeEmployeePost = (value) => {
   if (value === undefined || value === null) return value;
   const trimmed = String(value).trim();
   if (!trimmed) return trimmed;
-  return trimmed.toLowerCase() === 'rider' ? UNIVERSAL_RIDER_POSITION : trimmed;
+  if (isRiderPost(trimmed)) return UNIVERSAL_RIDER_POSITION;
+
+  const parts = trimmed
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+
+  const uniqueParts = [];
+  const seen = new Set();
+  parts.forEach((part) => {
+    const key = part.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueParts.push(part);
+    }
+  });
+
+  if (uniqueParts.length === 1) return uniqueParts[0];
+  return trimmed;
 };
 
 const resolveEffectiveBranchId = async (db, user) => {
@@ -165,7 +188,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
     if (req.user.role === 'night_manager') {
       const branchId = await resolveEffectiveBranchId(db, req.user);
-      if (!branchId || employee.branch_id !== branchId || employee.post?.toLowerCase() !== 'rider') {
+      if (!branchId || employee.branch_id !== branchId || !isRiderPost(employee.post)) {
         return res.status(403).json({ error: 'Access denied' });
       }
     }
@@ -304,7 +327,7 @@ router.post('/',
       }
 
       // Rider-specific requirement
-      if (effectivePost && effectivePost.toLowerCase() === 'rider') {
+      if (isRiderPost(effectivePost)) {
         if (!driving_license_number || driving_license_number.trim() === '') {
           if (req.files) {
             Object.values(req.files).flat().forEach(file => {
@@ -324,7 +347,7 @@ router.post('/',
       
       // If night_manager, ensure they can only create riders
       if (req.user.role === 'night_manager') {
-        if (!effectivePost || effectivePost.toLowerCase() !== 'rider') {
+        if (!isRiderPost(effectivePost)) {
           if (req.files) {
             Object.values(req.files).flat().forEach(file => {
               if (file && file.path) fs.unlinkSync(file.path);
@@ -473,7 +496,7 @@ router.put('/:id',
         }
       }
 
-      const nextPost = post !== undefined ? normalizeEmployeePost(post) : employee.post;
+      const nextPost = post !== undefined ? normalizeEmployeePost(post) : normalizeEmployeePost(employee.post);
       const nextDrivingLicenseNumber = driving_license_number !== undefined
         ? (driving_license_number || '').trim()
         : (employee.driving_license_number || '').trim();
@@ -511,7 +534,7 @@ router.put('/:id',
           }
           return res.status(403).json({ error: 'Night manager must be assigned to a branch' });
         }
-        if (employee.branch_id !== branchId || employee.post?.toLowerCase() !== 'rider') {
+        if (employee.branch_id !== branchId || !isRiderPost(employee.post)) {
           if (req.files) {
             Object.values(req.files).flat().forEach(file => {
               if (file && file.path) fs.unlinkSync(file.path);
@@ -522,7 +545,7 @@ router.put('/:id',
       }
 
       // Validate document-number requirement against final position after edit.
-      if (nextPost && nextPost.toLowerCase() === 'rider') {
+      if (isRiderPost(nextPost)) {
         if (!nextDrivingLicenseNumber) {
           if (req.files) {
             Object.values(req.files).flat().forEach(file => {
@@ -595,6 +618,10 @@ router.put('/:id',
       if (joining_date !== undefined) {
         updates.push(`joining_date = $${paramCount++}`);
         values.push(joining_date);
+      }
+      if (nextPost !== employee.post) {
+        updates.push(`post = $${paramCount++}`);
+        values.push(nextPost);
       }
       if (date_of_birth !== undefined) {
         updates.push(`date_of_birth = $${paramCount++}`);
@@ -717,7 +744,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       }
       if (
         employeeResult.rows[0].branch_id !== branchId ||
-        employeeResult.rows[0].post?.toLowerCase() !== 'rider'
+        !isRiderPost(employeeResult.rows[0].post)
       ) {
         return res.status(403).json({ error: 'Night manager can only mark inactive riders in own branch' });
       }

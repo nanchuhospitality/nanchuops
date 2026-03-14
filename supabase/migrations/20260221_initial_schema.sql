@@ -102,6 +102,7 @@ create index if not exists idx_employees_branch_id on public.employees (branch_i
 create index if not exists idx_users_branch_id on public.users (branch_id);
 create index if not exists idx_sales_records_date on public.sales_records (date);
 create index if not exists idx_sales_records_branch_id on public.sales_records (branch_id);
+create index if not exists idx_sales_records_user_id on public.sales_records (user_id);
 
 create or replace function public.touch_updated_at()
 returns trigger
