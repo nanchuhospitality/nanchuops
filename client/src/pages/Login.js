@@ -20,11 +20,7 @@ const Login = () => {
     setLoading(false);
 
     if (result.success) {
-      const branchSlug = result.user?.branch_code || 'main';
-      const targetPath = result.user?.role === 'night_manager'
-        ? `/${branchSlug}/sales`
-        : `/${branchSlug}/dashboard`;
-      navigate(targetPath);
+      navigate('/', { replace: true });
     } else {
       setError(result.error);
     }
