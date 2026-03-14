@@ -287,6 +287,8 @@ const Dashboard = () => {
     return <div className="dashboard-error">{error}</div>;
   }
 
+  const safeStats = stats || EMPTY_STATS;
+
   const formatCurrency = (amount) => {
     const formatted = new Intl.NumberFormat('en-NP', {
       style: 'currency',
@@ -416,31 +418,31 @@ const Dashboard = () => {
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-label">Total Sales</div>
-          <div className="stat-value">{formatCurrency(stats?.totalSales)}</div>
+          <div className="stat-value">{formatCurrency(safeStats.totalSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Today's Sales</div>
-          <div className="stat-value">{formatCurrency(stats?.todaySales)}</div>
+          <div className="stat-value">{formatCurrency(safeStats.todaySales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">This Month</div>
-          <div className="stat-value">{formatCurrency(stats?.monthSales)}</div>
+          <div className="stat-value">{formatCurrency(safeStats.monthSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total QR Sales</div>
-          <div className="stat-value">{formatCurrency(stats?.totalQRSales)}</div>
+          <div className="stat-value">{formatCurrency(safeStats.totalQRSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Cash Sales</div>
-          <div className="stat-value">{formatCurrency(stats?.totalCashSales)}</div>
+          <div className="stat-value">{formatCurrency(safeStats.totalCashSales)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Delivery Collect</div>
-          <div className="stat-value">{formatCurrency(stats?.totalDeliveryCollected)}</div>
+          <div className="stat-value">{formatCurrency(safeStats.totalDeliveryCollected)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Rider Payment</div>
-          <div className="stat-value">{formatCurrency(stats?.totalRiderPayment)}</div>
+          <div className="stat-value">{formatCurrency(safeStats.totalRiderPayment)}</div>
         </div>
       </div>
 
@@ -449,15 +451,15 @@ const Dashboard = () => {
         <div className="stats-grid">
           <div className="stat-card expense-card">
             <div className="stat-label">Total Transportation Expenses</div>
-            <div className="stat-value">{formatCurrency(stats?.totalTransportation)}</div>
+            <div className="stat-value">{formatCurrency(safeStats.totalTransportation)}</div>
           </div>
         </div>
 
-        {stats.transportationByRecipient && stats.transportationByRecipient.length > 0 && (
+        {safeStats.transportationByRecipient && safeStats.transportationByRecipient.length > 0 && (
           <div className="chart-card">
             <h3>Transportation Expenses by Employee (Last 30 Days)</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={stats.transportationByRecipient}>
+              <BarChart data={safeStats.transportationByRecipient}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="recipient_name" />
                 <YAxis />
@@ -474,7 +476,7 @@ const Dashboard = () => {
         <div className="chart-card">
           <h2>Sales Trend (Last 30 Days)</h2>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={stats.dailySales}>
+            <LineChart data={safeStats.dailySales}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="date" />
               <YAxis />
@@ -491,8 +493,8 @@ const Dashboard = () => {
             <PieChart>
               <Pie
                 data={[
-                  { name: 'QR Sales', value: stats.totalQRSales || 0 },
-                  { name: 'Cash Sales', value: stats.totalCashSales || 0 }
+                  { name: 'QR Sales', value: safeStats.totalQRSales || 0 },
+                  { name: 'Cash Sales', value: safeStats.totalCashSales || 0 }
                 ]}
                 dataKey="value"
                 nameKey="name"
@@ -514,9 +516,9 @@ const Dashboard = () => {
           <h2>Sales Breakdown</h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={[
-              { name: 'QR Sales', total: stats.totalQRSales || 0 },
-              { name: 'Cash Sales', total: stats.totalCashSales || 0 },
-              { name: 'Rider Payment', total: stats.totalRiderPayment || 0 }
+              { name: 'QR Sales', total: safeStats.totalQRSales || 0 },
+              { name: 'Cash Sales', total: safeStats.totalCashSales || 0 },
+              { name: 'Rider Payment', total: safeStats.totalRiderPayment || 0 }
             ]}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" />
